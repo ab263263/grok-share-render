@@ -1,0 +1,38 @@
+database:
+  default:
+    type: "mysql"
+    host: "127.0.0.1"
+    port: "3306"
+    user: "root"
+    pass: ""
+    name: "cool"
+    charset: "utf8mb4"
+    timezone: "Asia/Shanghai"
+    createdAt: "createTime"
+    updatedAt: "updateTime"
+
+redis:
+  cool:
+    address: "127.0.0.1:6379"
+    db: 0
+
+cool:
+  autoMigrate: true
+  eps: true
+  file:
+    mode: "local"
+    domain: "http://127.0.0.1:8001"
+
+modules:
+  base:
+    jwt:
+      sso: false
+      secret: "grok-share-render-secret-2026"
+      token:
+        expire: 7200
+        refreshExpire: 1296000
+    middleware:
+      authority:
+        enable: 1
+      log:
+        enable: 1
