@@ -23,6 +23,9 @@ COPY docker-entrypoint-initdb.d /docker-entrypoint-initdb.d
 # Token import script
 COPY import-tokens.py /app/import-tokens.py
 
+# Token file for auto-import on first startup
+COPY tokens.txt /app/data/tokens.txt
+
 # MariaDB low memory config for Render free plan
 RUN mkdir -p /etc/my.cnf.d /run/mysqld /var/lib/mysql /var/log && \
     echo "[mysqld]\nskip-name-resolve\ninnodb_buffer_pool_size=64M\nmax_connections=50\ntable_open_cache=64\nperformance_schema=OFF\nbind-address=127.0.0.1" > /etc/my.cnf.d/lowmem.cnf
