@@ -1,36 +1,28 @@
 FROM lyy0709/grok-share-server:dev
 
-# Install MariaDB + Redis + Supervisor on Alpine-based image
+# Install MariaDB + Redis on Alpine-based image
 RUN apk add --no-cache \
     mariadb \
     mariadb-client \
     redis \
-    supervisor \
     curl \
     python3 \
     bash
 
-# Supervisor config
-COPY supervisord.conf /etc/supervisord.conf
+# Database init script (sequential: mysql → redis → app → tokens)
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# Database init script
-COPY init-db.sh /init-db.sh
-RUN chmod +x /init-db.sh
-
-# Token import script (runs after autoMigrate creates tables)
-COPY init-tokens.sh /init-tokens.sh
-RUN chmod +x /init-tokens.sh
-
-# SQL schema
+# SQL schema (not used directly, just for reference)
 COPY docker-entrypoint-initdb.d /docker-entrypoint-initdb.d
 
 # Token import script
 COPY import-tokens.py /app/import-tokens.py
 
-# Token file for auto-import on first startup
+# Token file
 COPY tokens.txt /app/data/tokens.txt
 
-# Pre-generate SQL import file at build time (avoids runtime shell issues)
+# Pre-generate SQL import file at build time
 COPY generate-sql.py /app/generate-sql.py
 RUN python3 /app/generate-sql.py
 
@@ -43,10 +35,6 @@ RUN echo "maxmemory 32mb\nmaxmemory-policy allkeys-lru\nbind 127.0.0.1" > /etc/r
 
 # Overwrite app config to use localhost
 COPY config.yaml /app/config.yaml
-
-# Init entrypoint
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
 
 EXPOSE 8001
 
