@@ -37,8 +37,18 @@ echo "Database ready"
 
 # Start Redis
 echo "Starting Redis..."
-redis-server /etc/redis.conf --daemonize no &
+mkdir -p /var/lib/redis /var/log/redis
+redis-server /etc/redis.conf --daemonize no --loglevel notice 2>&1 &
 REDIS_PID=$!
+sleep 2
+# Check if Redis is running
+if kill -0 $REDIS_PID 2>/dev/null; then
+    echo "Redis started (PID $REDIS_PID)"
+else
+    echo "WARNING: Redis failed to start! Trying default config..."
+    redis-server --daemonize no --loglevel notice 2>&1 &
+    REDIS_PID=$!
+fi
 
 # Start Go app (autoMigrate will create tables)
 echo "Starting grok-app..."
