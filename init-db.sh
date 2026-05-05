@@ -54,7 +54,7 @@ DB_EXISTS=$(mysql -u root -e "SHOW DATABASES LIKE 'cool';" 2>/dev/null | grep -c
 if [ "$DB_EXISTS" = "0" ]; then
     echo "Creating database and importing schema..."
     mysql -u root -e "CREATE DATABASE IF NOT EXISTS cool CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-    mysql -u root -e "CREATE USER IF NOT EXISTS 'cool'@'localhost' IDENTIFIED BY '123123'; GRANT ALL PRIVILEGES ON cool.* TO 'cool'@'localhost'; FLUSH PRIVILEGES;"
+    mysql -u root -e "CREATE USER IF NOT EXISTS 'cool'@'localhost' IDENTIFIED BY '123123'; CREATE USER IF NOT EXISTS 'cool'@'127.0.0.1' IDENTIFIED BY '123123'; GRANT ALL PRIVILEGES ON cool.* TO 'cool'@'localhost'; GRANT ALL PRIVILEGES ON cool.* TO 'cool'@'127.0.0.1'; FLUSH PRIVILEGES;"
 
     if [ -f /docker-entrypoint-initdb.d/cool-20250228-123947.sql ]; then
         mysql -u root cool < /docker-entrypoint-initdb.d/cool-20250228-123947.sql
