@@ -1,28 +1,34 @@
 FROM lyy0709/grok-share-server:dev
 
-# Install MySQL + Redis + Supervisor
-RUN apt-get update && apt-get install -y \
-    mysql-server \
-    redis-server \
+# Install MariaDB + Redis + Supervisor on Alpine-based image
+RUN apk add --no-cache \
+    mariadb \
+    mariadb-client \
+    redis \
     supervisor \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    python3 \
+    bash
 
 # Supervisor config
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY supervisord.conf /etc/supervisord.conf
 
-# MySQL init script
+# Database init script
 COPY init-db.sh /init-db.sh
 RUN chmod +x /init-db.sh
+
+# SQL schema
+COPY docker-entrypoint-initdb.d /docker-entrypoint-initdb.d
 
 # Token import script
 COPY import-tokens.py /app/import-tokens.py
 
-# MySQL config for low memory (Render free = 512MB)
-RUN echo "[mysqld]\nskip-name-resolve\ninnodb_buffer_pool_size=64M\nmax_connections=50\ntable_open_cache=64\nperformance_schema=OFF" > /etc/mysql/conf.d/lowmem.cnf
+# MariaDB low memory config for Render free plan
+RUN mkdir -p /etc/my.cnf.d /run/mysqld /var/lib/mysql /var/log && \
+    echo "[mysqld]\nskip-name-resolve\ninnodb_buffer_pool_size=64M\nmax_connections=50\ntable_open_cache=64\nperformance_schema=OFF\nbind-address=127.0.0.1" > /etc/my.cnf.d/lowmem.cnf
 
-# Redis config for low memory
-RUN echo "maxmemory 32mb\nmaxmemory-policy allkeys-lru" >> /etc/redis/redis.conf
+# Redis low memory config
+RUN echo "maxmemory 32mb\nmaxmemory-policy allkeys-lru\nbind 127.0.0.1" > /etc/redis.conf
 
 # Overwrite app config to use localhost
 COPY config.yaml /app/config.yaml
