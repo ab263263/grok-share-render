@@ -25,15 +25,19 @@ fetch_tokens_if_needed() {
 
 import_tokens_if_needed() {
     TOKEN_COUNT=$(mysql -u root -N -e "SELECT COUNT(*) FROM cool.grok_session;" 2>/dev/null || echo "0")
-    if [ "$TOKEN_COUNT" != "0" ]; then
-        echo "grok_session already has $TOKEN_COUNT rows, skip token import"
-        return 0
-    fi
+    echo "Current grok_session rows: $TOKEN_COUNT"
 
     fetch_tokens_if_needed
     if [ -f "$TOKENS_FILE" ] && [ -s "$TOKENS_FILE" ]; then
-        echo "Importing ssotokens with batch script..."
-        TOKENS_FILE="$TOKENS_FILE" python3 /app/import-tokens.py
+        FILE_LINES=$(wc -l < "$TOKENS_FILE")
+        echo "Token file has $FILE_LINES lines, DB has $TOKEN_COUNT rows"
+        if [ "$TOKEN_COUNT" -lt "$FILE_LINES" ] 2>/dev/null; then
+            echo "DB has fewer tokens than file, re-importing..."
+            mysql -u root -e "TRUNCATE TABLE cool.grok_session;" 2>/dev/null || true
+            TOKENS_FILE="$TOKENS_FILE" python3 /app/import-tokens.py
+        else
+            echo "DB already has enough tokens, skip import"
+        fi
     else
         echo "No tokens file found; skip token import"
     fi
