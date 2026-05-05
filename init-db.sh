@@ -28,18 +28,53 @@ import_tokens_if_needed() {
     echo "Current grok_session rows: $TOKEN_COUNT"
 
     fetch_tokens_if_needed
-    if [ -f "$TOKENS_FILE" ] && [ -s "$TOKENS_FILE" ]; then
-        FILE_LINES=$(wc -l < "$TOKENS_FILE")
-        echo "Token file has $FILE_LINES lines, DB has $TOKEN_COUNT rows"
-        if [ "$TOKEN_COUNT" -lt "$FILE_LINES" ] 2>/dev/null; then
-            echo "DB has fewer tokens than file, re-importing..."
-            mysql -u root -e "TRUNCATE TABLE cool.grok_session;" 2>/dev/null || true
-            TOKENS_FILE="$TOKENS_FILE" python3 /app/import-tokens.py
-        else
-            echo "DB already has enough tokens, skip import"
-        fi
-    else
+    if [ ! -f "$TOKENS_FILE" ] || [ ! -s "$TOKENS_FILE" ]; then
         echo "No tokens file found; skip token import"
+        return 0
+    fi
+
+    FILE_LINES=$(grep -c '.' "$TOKENS_FILE")
+    echo "Token file has $FILE_LINES lines, DB has $TOKEN_COUNT rows"
+
+    # Always re-import if file has more tokens or DB is empty
+    if [ "$TOKEN_COUNT" -ge "$FILE_LINES" ] 2>/dev/null; then
+        echo "DB already has enough tokens ($TOKEN_COUNT >= $FILE_LINES), skip import"
+        return 0
+    fi
+
+    echo "Re-importing tokens..."
+    mysql -u root -e "TRUNCATE TABLE cool.grok_session;" 2>/dev/null || true
+
+    # Generate SQL file and load in one shot (fast + low memory)
+    SQL_FILE="/tmp/tokens_import.sql"
+    echo "INSERT INTO grok_session (createTime, updateTime, email, password, status, isPro, officialSession, remark, sort, count) VALUES" > "$SQL_FILE"
+    IDX=0
+    FIRST=1
+    while IFS= read -r TOKEN; do
+        [ -z "$TOKEN" ] && continue
+        SAFE_TOKEN=$(echo "$TOKEN" | sed "s/'/\\\\'/g")
+        EMAIL="pool_$(printf '%06d' $IDX)"
+        if [ "$FIRST" -eq 1 ]; then
+            FIRST=0
+        else
+            echo "," >> "$SQL_FILE"
+        fi
+        printf "(NOW(), NOW(), '%s', '', 1, 0, '%s', 'auto-import', 0, 0)" "$EMAIL" "$SAFE_TOKEN" >> "$SQL_FILE"
+        IDX=$((IDX + 1))
+    done < "$TOKENS_FILE"
+    echo ";" >> "$SQL_FILE"
+
+    echo "Generated SQL with $IDX rows, loading..."
+    mysql -u root cool < "$SQL_FILE" 2>&1
+    RESULT=$?
+    rm -f "$SQL_FILE"
+
+    if [ $RESULT -eq 0 ]; then
+        FINAL_COUNT=$(mysql -u root -N -e "SELECT COUNT(*) FROM cool.grok_session;" 2>/dev/null || echo "?")
+        echo "Token import complete: $FINAL_COUNT rows in DB"
+    else
+        echo "SQL import failed (exit $RESULT), trying Python fallback..."
+        TOKENS_FILE="$TOKENS_FILE" python3 /app/import-tokens.py
     fi
 }
 
