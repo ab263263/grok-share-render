@@ -17,6 +17,10 @@ COPY supervisord.conf /etc/supervisord.conf
 COPY init-db.sh /init-db.sh
 RUN chmod +x /init-db.sh
 
+# Token import script (runs after autoMigrate creates tables)
+COPY init-tokens.sh /init-tokens.sh
+RUN chmod +x /init-tokens.sh
+
 # SQL schema
 COPY docker-entrypoint-initdb.d /docker-entrypoint-initdb.d
 
