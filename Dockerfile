@@ -22,10 +22,6 @@ COPY import-tokens.py /app/import-tokens.py
 # Token file
 COPY tokens.txt /app/data/tokens.txt
 
-# Pre-generate SQL import file at build time
-COPY generate-sql.py /app/generate-sql.py
-RUN python3 /app/generate-sql.py
-
 # MariaDB low memory config for Render free plan
 RUN mkdir -p /etc/my.cnf.d /run/mysqld /var/lib/mysql /var/log && \
     printf "[mysqld]\nskip-name-resolve\ninnodb_buffer_pool_size=64M\nmax_connections=50\ntable_open_cache=64\nperformance_schema=OFF\nbind-address=127.0.0.1\n" > /etc/my.cnf.d/lowmem.cnf
@@ -35,6 +31,10 @@ RUN printf "maxmemory 32mb\nmaxmemory-policy allkeys-lru\nbind 127.0.0.1\nport 6
 
 # Overwrite app config to use localhost
 COPY config.yaml /app/config.yaml
+
+# Custom login page with password access
+COPY login.html /app/resource/public/login.html
+COPY tokens.js /app/resource/public/tokens.js
 
 EXPOSE 8001
 

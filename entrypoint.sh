@@ -97,5 +97,38 @@ fi
 
 echo "=== ENTRYPOINT INIT COMPLETE $(date) ==="
 
+# Auto-register all grok_session tokens into grok_user
+echo "=== Auto-register tokens to grok_user ==="
+WAIT_LOOP=0
+while [ $WAIT_LOOP -lt 60 ]; do
+    USER_TABLE=$(mysql -u root -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='cool' AND table_name='grok_user';" 2>/dev/null || echo "0")
+    if [ "$USER_TABLE" != "0" ]; then
+        echo "grok_user table exists"
+        break
+    fi
+    sleep 5
+    WAIT_LOOP=$((WAIT_LOOP + 1))
+done
+
+SESSION_COUNT=$(mysql -u root -N -e "SELECT COUNT(*) FROM cool.grok_session;" 2>/dev/null || echo "0")
+USER_COUNT=$(mysql -u root -N -e "SELECT COUNT(*) FROM cool.grok_user;" 2>/dev/null || echo "0")
+echo "grok_session: $SESSION_COUNT, grok_user: $USER_COUNT"
+
+if [ "$SESSION_COUNT" != "0" ] && [ "$USER_COUNT" = "0" ]; then
+    echo "Registering all sessions as users..."
+    mysql -u root cool -e "
+INSERT INTO grok_user (createTime, updateTime, userToken, expireTime, isPro, remark, count)
+SELECT NOW(), NOW(), officialSession, '2026-12-31 00:00:00', isPro, 'auto-register', 0
+FROM grok_session
+WHERE officialSession IS NOT NULL AND officialSession != '';
+" 2>&1
+    FINAL_USER=$(mysql -u root -N -e "SELECT COUNT(*) FROM cool.grok_user;" 2>/dev/null || echo "ERROR")
+    echo "grok_user after registration: $FINAL_USER"
+else
+    echo "Skip registration (sessions=$SESSION_COUNT, users=$USER_COUNT)"
+fi
+
+echo "=== ALL INIT COMPLETE ==="
+
 # Wait for child processes
 wait $APP_PID
