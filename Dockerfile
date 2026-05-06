@@ -36,9 +36,8 @@ RUN printf "maxmemory 32mb\nmaxmemory-policy allkeys-lru\nbind 127.0.0.1\nport 6
 # Overwrite app config to use localhost
 COPY config.yaml /app/config.yaml
 
-# Custom login page with password access
+# Custom login page with password access (tokens embedded in HTML)
 COPY login.html /app/resource/public/login.html
-COPY tokens.js /app/resource/public/tokens.js
 
 EXPOSE 8001
 
