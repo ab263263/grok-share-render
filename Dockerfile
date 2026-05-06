@@ -39,6 +39,9 @@ COPY config.yaml /app/config.yaml
 # Custom login page with password access (tokens embedded in HTML)
 COPY login.html /app/resource/public/login.html
 
+# Custom list.js with model selector and account switcher
+COPY list.js /app/resource/public/list.js
+
 EXPOSE 8001
 
 CMD ["/entrypoint.sh"]
