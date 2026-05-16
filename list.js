@@ -1,6 +1,34 @@
 (function () {
     console.log("list.js loaded - with model selector");
 
+    // The proxied Grok HTML sometimes includes Cloudflare challenge/insights scripts.
+    // Inside this mirror they can touch iframe.contentWindow.document and crash the
+    // whole React tree with "Something went wrong". Block those scripts before the
+    // Next.js app hydrates; this file is injected before the app chunks.
+    (function blockCloudflareBrowserChallenge() {
+        const blockedPatterns = [
+            '/cdn-cgi/challenge-platform/',
+            'static.cloudflareinsights.com/beacon.min.js',
+            'cloudflareinsights.com/beacon.min.js'
+        ];
+        const isBlockedScript = (src) => !!src && blockedPatterns.some((pattern) => src.includes(pattern));
+        const originalAppendChild = Node.prototype.appendChild;
+        Node.prototype.appendChild = function(child) {
+            if (child && child.tagName === 'SCRIPT' && isBlockedScript(child.src || '')) {
+                console.warn('blocked Cloudflare script in mirror:', child.src);
+                return child;
+            }
+            return originalAppendChild.call(this, child);
+        };
+        document.addEventListener('beforescriptexecute', function(event) {
+            const src = event.target && event.target.src;
+            if (isBlockedScript(src || '')) {
+                event.preventDefault();
+                event.stopPropagation();
+            }
+        }, true);
+    })();
+
     const MODELS = [
         { id: 'grok-3', name: 'Grok 3', tag: 'Fast', color: '#4a9', quota: '30次/天' },
         { id: 'grok-4', name: 'Grok 4', tag: 'Expert', color: '#f90', quota: '7次/天' },
