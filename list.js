@@ -117,6 +117,67 @@
             border-top: 1px solid #2a2a2a;
             margin-top: 4px;
         }
+        .grok-panel-action {
+            width: 100%;
+            border: 1px solid #333;
+            background: #111;
+            color: #eee;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-top: 6px;
+            cursor: pointer;
+            text-align: left;
+            font-size: 12px;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .grok-panel-action:hover { border-color: #4a9; background: #151515; }
+        #grok-imagine-dialog {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 1000000;
+            background: rgba(0,0,0,0.55);
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        #grok-imagine-dialog.show { display: flex; }
+        .grok-imagine-card {
+            width: min(520px, 100%);
+            background: #151515;
+            border: 1px solid #333;
+            border-radius: 16px;
+            box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+            color: #eee;
+            padding: 18px;
+        }
+        .grok-imagine-card h3 { font-size: 16px; margin: 0 0 8px; }
+        .grok-imagine-card p { font-size: 12px; color: #888; margin: 0 0 12px; line-height: 1.5; }
+        .grok-imagine-card textarea {
+            width: 100%;
+            min-height: 120px;
+            resize: vertical;
+            border-radius: 10px;
+            border: 1px solid #333;
+            background: #0a0a0a;
+            color: #eee;
+            padding: 12px;
+            outline: none;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .grok-imagine-buttons { display: flex; gap: 8px; margin-top: 12px; }
+        .grok-imagine-buttons button {
+            flex: 1;
+            border: 0;
+            border-radius: 10px;
+            padding: 11px 12px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .grok-imagine-primary { background: #fff; color: #111; }
+        .grok-imagine-secondary { background: #252525; color: #ddd; }
         [data-theme="dark"] #grok-panel-toggle,
         .dark #grok-panel-toggle {
             background: rgba(30,30,30,0.95);
@@ -163,9 +224,20 @@
             menu.appendChild(item);
         });
 
+        const imagine = document.createElement('button');
+        imagine.type = 'button';
+        imagine.className = 'grok-panel-action';
+        imagine.textContent = 'Imagine 图片生成';
+        imagine.addEventListener('click', (e) => {
+            e.stopPropagation();
+            menu.classList.remove('show');
+            openImagineDialog();
+        });
+        menu.appendChild(imagine);
+
         const info = document.createElement('div');
         info.className = 'grok-panel-info';
-        info.textContent = '3504 账号自动轮询 | 点击切换账号';
+        info.textContent = '账号池运行时注入 | 源码不暴露 Token';
         menu.appendChild(info);
 
         toggle.addEventListener('click', (e) => {
@@ -212,6 +284,44 @@
         return origFetch.apply(this, args);
     };
 
+    function createImagineDialog() {
+        const dialog = document.createElement('div');
+        dialog.id = 'grok-imagine-dialog';
+        dialog.innerHTML = '<div class="grok-imagine-card"><h3>Grok Imagine 图片生成</h3><p>先做图片，不做视频。输入图片提示词后会自动打开一个新聊天，并把提示词整理成 Grok Imagine 请求。若当前账号不支持 Imagine，请换号或换模型后重试。</p><textarea id="grok-imagine-prompt" placeholder="例如：赛博朋克香港雨夜，霓虹灯，电影质感，35mm，超细节"></textarea><div class="grok-imagine-buttons"><button type="button" class="grok-imagine-secondary" id="grok-imagine-close">取消</button><button type="button" class="grok-imagine-primary" id="grok-imagine-send">发送到聊天</button></div></div>';
+        document.body.appendChild(dialog);
+        dialog.addEventListener('click', (event) => {
+            if (event.target === dialog) closeImagineDialog();
+        });
+        dialog.querySelector('#grok-imagine-close').addEventListener('click', closeImagineDialog);
+        dialog.querySelector('#grok-imagine-send').addEventListener('click', sendImaginePrompt);
+        return dialog;
+    }
+
+    function openImagineDialog() {
+        const dialog = document.getElementById('grok-imagine-dialog') || createImagineDialog();
+        dialog.classList.add('show');
+        const input = document.getElementById('grok-imagine-prompt');
+        if (input) setTimeout(() => input.focus(), 0);
+    }
+
+    function closeImagineDialog() {
+        const dialog = document.getElementById('grok-imagine-dialog');
+        if (dialog) dialog.classList.remove('show');
+    }
+
+    function sendImaginePrompt() {
+        const input = document.getElementById('grok-imagine-prompt');
+        const raw = input ? input.value.trim() : '';
+        if (!raw) return;
+        const prompt = '请使用 Grok Imagine 生成一张图片。要求：' + raw + '\n只生成图片，不要生成视频。';
+        closeImagineDialog();
+        try {
+            navigator.clipboard && navigator.clipboard.writeText(prompt);
+        } catch (e) {}
+        const encoded = encodeURIComponent(prompt);
+        window.location.href = '/?q=' + encoded;
+    }
+
     // Create switch account button (original functionality)
     function createSwitchButton() {
         const btn = document.createElement('div');
@@ -225,6 +335,7 @@
     function init() {
         if (!document.getElementById('grok-panel')) createPanel();
         if (!document.getElementById('grok-switch-btn')) createSwitchButton();
+        if (!document.getElementById('grok-imagine-dialog')) createImagineDialog();
         updatePanel();
     }
 

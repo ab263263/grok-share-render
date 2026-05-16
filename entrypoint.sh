@@ -128,6 +128,20 @@ else
     echo "Skip registration (sessions=$SESSION_COUNT, users=$USER_COUNT)"
 fi
 
+echo "=== Prepare lightweight login token ==="
+LOGIN_HTML="/app/resource/public/login.html"
+LOGIN_TOKEN=$(mysql -u root -N -e "SELECT userToken FROM cool.grok_user WHERE userToken IS NOT NULL AND userToken != '' ORDER BY count ASC, updateTime ASC LIMIT 1;" 2>/dev/null | head -n 1 || true)
+if [ -z "$LOGIN_TOKEN" ]; then
+    LOGIN_TOKEN=$(mysql -u root -N -e "SELECT officialSession FROM cool.grok_session WHERE officialSession IS NOT NULL AND officialSession != '' ORDER BY count ASC, updateTime ASC LIMIT 1;" 2>/dev/null | head -n 1 || true)
+fi
+if [ -n "$LOGIN_TOKEN" ] && [ -f "$LOGIN_HTML" ]; then
+    ESCAPED_TOKEN=$(printf '%s' "$LOGIN_TOKEN" | sed "s/[\\&]/\\\\&/g; s/'/\\\\'/g")
+    sed -i "s#</script>#window.__GROK_LOGIN_TOKEN__ = '$ESCAPED_TOKEN';\n</script>#" "$LOGIN_HTML"
+    echo "Injected one login token into lightweight login page"
+else
+    echo "WARNING: No login token available for lightweight login page"
+fi
+
 echo "=== ALL INIT COMPLETE ==="
 
 # Wait for child processes

@@ -1,3 +1,13 @@
 data/
+local-data/
+mysql-data/
+redis-data/
 *.log
+.env
+.env.*
+tokens.txt
+*.token*
+*.secret*
+*_import.sql
+docker-entrypoint-initdb.d/*.sql
 .git
