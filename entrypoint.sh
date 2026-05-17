@@ -85,7 +85,11 @@ if [ "$TOKEN_COUNT" = "0" ]; then
         printf '%s\n' "$GROK_TOKENS" | tr ',;' '\n\n' | sed '/^[[:space:]]*$/d' > "$TOKENS_FILE"
     elif [ -n "${TOKENS_URL:-}" ]; then
         echo "Downloading tokens from TOKENS_URL env..."
-        curl -fsSL "$TOKENS_URL" -o "$TOKENS_FILE" || echo "WARNING: Failed to download TOKENS_URL"
+        if [ -n "${GITHUB_TOKEN:-}" ]; then
+            curl -fsSL -H "Authorization: token ${GITHUB_TOKEN}" -H "Accept: application/vnd.github.raw" "$TOKENS_URL" -o "$TOKENS_FILE" || echo "WARNING: Failed to download TOKENS_URL with GITHUB_TOKEN"
+        else
+            curl -fsSL "$TOKENS_URL" -o "$TOKENS_FILE" || echo "WARNING: Failed to download TOKENS_URL"
+        fi
     elif [ -n "${TOKENS_FILE:-}" ] && [ -f "$TOKENS_FILE" ]; then
         echo "Using existing TOKENS_FILE env: $TOKENS_FILE"
     fi
