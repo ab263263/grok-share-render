@@ -68,6 +68,7 @@ for i in $(seq 1 120); do
 done
 
 # Import tokens if table is empty
+mkdir -p /app/data
 echo "=== Token import phase ==="
 TOKEN_COUNT=$(mysql -u root -N -e "SELECT COUNT(*) FROM cool.grok_session;" 2>/dev/null || echo "ERROR")
 echo "Current grok_session rows: $TOKEN_COUNT"
@@ -75,6 +76,14 @@ echo "Current grok_session rows: $TOKEN_COUNT"
 if [ "$TOKEN_COUNT" = "0" ]; then
     SQL_FILE="/app/data/tokens_import.sql"
     TOKENS_FILE="/app/data/tokens.txt"
+
+    if [ -n "${GROK_TOKENS_B64:-}" ]; then
+        echo "Writing tokens from GROK_TOKENS_B64 env..."
+        printf '%s' "$GROK_TOKENS_B64" | base64 -d > "$TOKENS_FILE" 2>/dev/null || echo "WARNING: Failed to decode GROK_TOKENS_B64"
+    elif [ -n "${GROK_TOKENS:-}" ]; then
+        echo "Writing tokens from GROK_TOKENS env..."
+        printf '%s\n' "$GROK_TOKENS" | tr ',;' '\n\n' | sed '/^[[:space:]]*$/d' > "$TOKENS_FILE"
+    fi
     
     if [ -f "$SQL_FILE" ] && [ -s "$SQL_FILE" ]; then
         SQL_SIZE=$(wc -c < "$SQL_FILE")
@@ -88,7 +97,7 @@ if [ "$TOKEN_COUNT" = "0" ]; then
         FINAL=$(mysql -u root -N -e "SELECT COUNT(*) FROM cool.grok_session;" 2>/dev/null || echo "ERROR")
         echo "Result: $FINAL rows"
     else
-        echo "WARNING: No token files found!"
+        echo "WARNING: No token files found and no GROK_TOKENS/GROK_TOKENS_B64 env provided!"
         ls -la /app/data/ 2>&1
     fi
 else
