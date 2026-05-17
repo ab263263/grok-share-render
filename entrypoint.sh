@@ -148,11 +148,9 @@ if [ -n "$LOGIN_TOKEN" ]; then
     ESCAPED_TOKEN=$(printf '%s' "$LOGIN_TOKEN" | sed "s/[\\&]/\\\\&/g; s/'/\\\\'/g")
     printf "window.__GROK_LOGIN_TOKEN__ = '%s';\nwindow.__GROK_LOGIN_TOKEN_READY__ = true;\nwindow.__GROK_LOGIN_TOKEN_ERROR__ = '';\n" "$ESCAPED_TOKEN" > "$TOKEN_JS"
     echo "Generated runtime token.js for lightweight login page"
-elif [ -f "$TOKEN_JS" ]; then
+else
     printf "window.__GROK_LOGIN_TOKEN__ = '';\nwindow.__GROK_LOGIN_TOKEN_READY__ = false;\nwindow.__GROK_LOGIN_TOKEN_ERROR__ = 'missing';\n" > "$TOKEN_JS"
     echo "WARNING: No login token available; wrote empty token.js"
-else
-    echo "WARNING: No login token available for lightweight login page"
 fi
 
 echo "=== ALL INIT COMPLETE ==="
