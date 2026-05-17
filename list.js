@@ -235,6 +235,14 @@
         });
         menu.appendChild(imagine);
 
+        const ad = document.createElement('div');
+        ad.className = 'grok-panel-info';
+        ad.style.color = '#7dffb2';
+        ad.style.fontWeight = '700';
+        ad.style.lineHeight = '1.5';
+        ad.textContent = '公益token群175877552 · 希望人人tokne自由';
+        menu.appendChild(ad);
+
         const info = document.createElement('div');
         info.className = 'grok-panel-info';
         info.textContent = '账号池运行时注入 | 源码不暴露 Token';
