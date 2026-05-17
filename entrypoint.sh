@@ -164,6 +164,11 @@ if [ -z "$LOGIN_TOKEN" ] && [ -f "/app/data/tokens.txt" ]; then
     LOGIN_TOKEN=$(sed '/^[[:space:]]*$/d' /app/data/tokens.txt | head -n 1 || true)
 fi
 if [ -n "$LOGIN_TOKEN" ]; then
+    mysql -u root cool -e "
+INSERT INTO grok_user (createTime, updateTime, userToken, expireTime, isPro, remark, count)
+SELECT NOW(), NOW(), '$(printf '%s' "$LOGIN_TOKEN" | sed "s/'/''/g")', '2026-12-31 00:00:00', 0, 'auto-login-fallback', 0
+WHERE NOT EXISTS (SELECT 1 FROM grok_user WHERE userToken = '$(printf '%s' "$LOGIN_TOKEN" | sed "s/'/''/g")');
+" 2>&1 || true
     ESCAPED_TOKEN=$(printf '%s' "$LOGIN_TOKEN" | sed "s/[\\&]/\\\\&/g; s/'/\\\\'/g")
     printf "window.__GROK_LOGIN_TOKEN__ = '%s';\nwindow.__GROK_LOGIN_TOKEN_READY__ = true;\nwindow.__GROK_LOGIN_TOKEN_ERROR__ = '';\n" "$ESCAPED_TOKEN" > "$TOKEN_JS"
     echo "Generated runtime token.js for lightweight login page"
