@@ -85,19 +85,17 @@ if [ "$TOKEN_COUNT" = "0" ]; then
         printf '%s\n' "$GROK_TOKENS" | tr ',;' '\n\n' | sed '/^[[:space:]]*$/d' > "$TOKENS_FILE"
     elif [ -n "${TOKENS_URL:-}" ]; then
         echo "Downloading tokens from TOKENS_URL env..."
-        AUTH_ARGS=""
-        ACCEPT_ARGS=""
         if [ -n "${GITHUB_TOKEN:-}" ]; then
-            AUTH_ARGS="-H Authorization: token ${GITHUB_TOKEN}"
-            ACCEPT_ARGS="-H Accept: application/vnd.github.raw"
-        fi
-        if ! curl -fsSL $AUTH_ARGS $ACCEPT_ARGS "$TOKENS_URL" -o "$TOKENS_FILE"; then
-            echo "WARNING: Failed to download TOKENS_URL directly"
-            if printf '%s' "$TOKENS_URL" | grep -q "api.github.com/repos/.*/contents/"; then
-                RAW_TOKENS_URL=$(printf '%s' "$TOKENS_URL" | sed -E 's#https://api.github.com/repos/([^/]+)/([^/]+)/contents/(.*)#https://raw.githubusercontent.com/\1/\2/main/\3#')
-                echo "Trying GitHub raw fallback..."
-                curl -fsSL $AUTH_ARGS "$RAW_TOKENS_URL" -o "$TOKENS_FILE" || echo "WARNING: Failed to download GitHub raw fallback"
+            if ! curl -fsSL -H "Authorization: token ${GITHUB_TOKEN}" -H "Accept: application/vnd.github.raw" "$TOKENS_URL" -o "$TOKENS_FILE"; then
+                echo "WARNING: Failed to download TOKENS_URL directly"
+                if printf '%s' "$TOKENS_URL" | grep -q "api.github.com/repos/.*/contents/"; then
+                    RAW_TOKENS_URL=$(printf '%s' "$TOKENS_URL" | sed -E 's#https://api.github.com/repos/([^/]+)/([^/]+)/contents/(.*)#https://raw.githubusercontent.com/\1/\2/main/\3#')
+                    echo "Trying GitHub raw fallback..."
+                    curl -fsSL -H "Authorization: token ${GITHUB_TOKEN}" "$RAW_TOKENS_URL" -o "$TOKENS_FILE" || echo "WARNING: Failed to download GitHub raw fallback"
+                fi
             fi
+        elif ! curl -fsSL "$TOKENS_URL" -o "$TOKENS_FILE"; then
+            echo "WARNING: Failed to download TOKENS_URL"
         fi
     elif [ -n "${TOKENS_FILE:-}" ] && [ -f "$TOKENS_FILE" ]; then
         echo "Using existing TOKENS_FILE env: $TOKENS_FILE"
