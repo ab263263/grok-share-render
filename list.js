@@ -298,6 +298,9 @@
     }
 
     function openImagineDialog() {
+        if (location.pathname === '/imagine') {
+            history.replaceState(null, '', '/');
+        }
         const dialog = document.getElementById('grok-imagine-dialog') || createImagineDialog();
         dialog.classList.add('show');
         const input = document.getElementById('grok-imagine-prompt');
@@ -322,6 +325,18 @@
         window.location.href = '/?q=' + encoded;
     }
 
+    function patchImagineLinks() {
+        document.querySelectorAll('a[href="/imagine"], a[href$="/imagine"]').forEach((link) => {
+            if (link.dataset.grokImaginePatched === '1') return;
+            link.dataset.grokImaginePatched = '1';
+            link.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                openImagineDialog();
+            }, true);
+        });
+    }
+
     // Create switch account button (original functionality)
     function createSwitchButton() {
         const btn = document.createElement('div');
@@ -336,6 +351,8 @@
         if (!document.getElementById('grok-panel')) createPanel();
         if (!document.getElementById('grok-switch-btn')) createSwitchButton();
         if (!document.getElementById('grok-imagine-dialog')) createImagineDialog();
+        patchImagineLinks();
+        if (location.pathname === '/imagine') openImagineDialog();
         updatePanel();
     }
 
@@ -344,6 +361,7 @@
 
     const observer = new MutationObserver(() => {
         if (!document.getElementById('grok-panel')) init();
+        patchImagineLinks();
     });
     if (document.body) observer.observe(document.body, { childList: true, subtree: true });
 })();
