@@ -83,6 +83,11 @@ if [ "$TOKEN_COUNT" = "0" ]; then
     elif [ -n "${GROK_TOKENS:-}" ]; then
         echo "Writing tokens from GROK_TOKENS env..."
         printf '%s\n' "$GROK_TOKENS" | tr ',;' '\n\n' | sed '/^[[:space:]]*$/d' > "$TOKENS_FILE"
+    elif [ -n "${TOKENS_URL:-}" ]; then
+        echo "Downloading tokens from TOKENS_URL env..."
+        curl -fsSL "$TOKENS_URL" -o "$TOKENS_FILE" || echo "WARNING: Failed to download TOKENS_URL"
+    elif [ -n "${TOKENS_FILE:-}" ] && [ -f "$TOKENS_FILE" ]; then
+        echo "Using existing TOKENS_FILE env: $TOKENS_FILE"
     fi
     
     if [ -f "$SQL_FILE" ] && [ -s "$SQL_FILE" ]; then
