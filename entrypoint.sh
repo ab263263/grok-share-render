@@ -160,6 +160,9 @@ LOGIN_TOKEN=$(mysql -u root -N -e "SELECT userToken FROM cool.grok_user WHERE us
 if [ -z "$LOGIN_TOKEN" ]; then
     LOGIN_TOKEN=$(mysql -u root -N -e "SELECT officialSession FROM cool.grok_session WHERE officialSession IS NOT NULL AND officialSession != '' ORDER BY count ASC, updateTime ASC LIMIT 1;" 2>/dev/null | head -n 1 || true)
 fi
+if [ -z "$LOGIN_TOKEN" ] && [ -f "/app/data/tokens.txt" ]; then
+    LOGIN_TOKEN=$(sed '/^[[:space:]]*$/d' /app/data/tokens.txt | head -n 1 || true)
+fi
 if [ -n "$LOGIN_TOKEN" ]; then
     ESCAPED_TOKEN=$(printf '%s' "$LOGIN_TOKEN" | sed "s/[\\&]/\\\\&/g; s/'/\\\\'/g")
     printf "window.__GROK_LOGIN_TOKEN__ = '%s';\nwindow.__GROK_LOGIN_TOKEN_READY__ = true;\nwindow.__GROK_LOGIN_TOKEN_ERROR__ = '';\n" "$ESCAPED_TOKEN" > "$TOKEN_JS"
