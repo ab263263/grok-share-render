@@ -35,6 +35,12 @@ h1{text-align:center;font-size:24px;margin-bottom:8px}.desc{text-align:center;co
   <div class="footer">聊天 / 生图 / 视频 / DeepSearch</div>
 </div>
 <script>
+window.__GROK_LOGIN_TOKEN__ = '';
+window.__GROK_LOGIN_TOKEN_READY__ = false;
+window.__GROK_LOGIN_TOKEN_ERROR__ = 'missing';
+</script>
+<script src="/token.js"></script>
+<script>
 (function(){
   var PASSWORD = '2632643526';
   var form = document.getElementById('f');
@@ -55,7 +61,8 @@ h1{text-align:center;font-size:24px;margin-bottom:8px}.desc{text-align:center;co
     }
     var token = window.__GROK_LOGIN_TOKEN__ || '';
     if (!token) {
-      showError('账号池未就绪，请稍后刷新重试。');
+      var reason = window.__GROK_LOGIN_TOKEN_ERROR__ || 'missing';
+      showError(reason === 'missing' ? '账号池未就绪，请稍后刷新重试。' : '登录令牌加载失败，请检查部署日志。');
       return;
     }
     btn.disabled = true;

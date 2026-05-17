@@ -139,14 +139,18 @@ fi
 
 echo "=== Prepare lightweight login token ==="
 LOGIN_HTML="/app/resource/public/login.html"
+TOKEN_JS="/app/resource/public/token.js"
 LOGIN_TOKEN=$(mysql -u root -N -e "SELECT userToken FROM cool.grok_user WHERE userToken IS NOT NULL AND userToken != '' ORDER BY count ASC, updateTime ASC LIMIT 1;" 2>/dev/null | head -n 1 || true)
 if [ -z "$LOGIN_TOKEN" ]; then
     LOGIN_TOKEN=$(mysql -u root -N -e "SELECT officialSession FROM cool.grok_session WHERE officialSession IS NOT NULL AND officialSession != '' ORDER BY count ASC, updateTime ASC LIMIT 1;" 2>/dev/null | head -n 1 || true)
 fi
-if [ -n "$LOGIN_TOKEN" ] && [ -f "$LOGIN_HTML" ]; then
+if [ -n "$LOGIN_TOKEN" ]; then
     ESCAPED_TOKEN=$(printf '%s' "$LOGIN_TOKEN" | sed "s/[\\&]/\\\\&/g; s/'/\\\\'/g")
-    sed -i "s#</script>#window.__GROK_LOGIN_TOKEN__ = '$ESCAPED_TOKEN';\n</script>#" "$LOGIN_HTML"
-    echo "Injected one login token into lightweight login page"
+    printf "window.__GROK_LOGIN_TOKEN__ = '%s';\nwindow.__GROK_LOGIN_TOKEN_READY__ = true;\nwindow.__GROK_LOGIN_TOKEN_ERROR__ = '';\n" "$ESCAPED_TOKEN" > "$TOKEN_JS"
+    echo "Generated runtime token.js for lightweight login page"
+elif [ -f "$TOKEN_JS" ]; then
+    printf "window.__GROK_LOGIN_TOKEN__ = '';\nwindow.__GROK_LOGIN_TOKEN_READY__ = false;\nwindow.__GROK_LOGIN_TOKEN_ERROR__ = 'missing';\n" > "$TOKEN_JS"
+    echo "WARNING: No login token available; wrote empty token.js"
 else
     echo "WARNING: No login token available for lightweight login page"
 fi
