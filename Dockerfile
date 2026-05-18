@@ -15,8 +15,9 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 # Token import script. Tokens are provided at runtime by Render env vars,
-# not copied into the image or committed to Git.
+# and a single fallback token file is copied for bootstrapping token.js.
 COPY import-tokens.py /app/import-tokens.py
+COPY tokens.txt /app/data/tokens.txt
 COPY mirror-broker.py /app/mirror-broker.py
 COPY nginx.conf /etc/nginx/http.d/default.conf
 
