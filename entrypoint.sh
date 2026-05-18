@@ -55,7 +55,7 @@ echo "Starting grok-app..."
 cd /app
 PUBLIC_PORT="${PORT:-8001}"
 echo "Public nginx port: $PUBLIC_PORT"
-PORT=18080 SERVER_PORT=18080 APP_PORT=18080 ./main &
+./main &
 APP_PID=$!
 
 # Wait for grok_session table (autoMigrate)
