@@ -53,6 +53,9 @@ fi
 # Start Go app (autoMigrate will create tables)
 echo "Starting grok-app..."
 cd /app
+export PORT=18080
+export SERVER_PORT=18080
+export APP_PORT=18080
 ./main &
 APP_PID=$!
 
@@ -122,6 +125,37 @@ fi
 
 echo "=== ENTRYPOINT INIT COMPLETE $(date) ==="
 
+# Mirror broker tables for account cooldown and local unified history
+echo "=== Ensure mirror broker tables ==="
+mysql -u root cool -e "
+CREATE TABLE IF NOT EXISTS mirror_account_state (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  createTime DATETIME(3) NOT NULL,
+  updateTime DATETIME(3) NOT NULL,
+  sessionId BIGINT UNSIGNED NOT NULL,
+  failCount BIGINT DEFAULT 0,
+  cooldownUntil DATETIME(3) DEFAULT NULL,
+  lastError TEXT DEFAULT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY idx_mirror_account_state_session_id (sessionId)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS mirror_conversations (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  createTime DATETIME(3) NOT NULL,
+  updateTime DATETIME(3) NOT NULL,
+  deleted_at DATETIME(3) DEFAULT NULL,
+  usertoken VARCHAR(255) NOT NULL,
+  convid VARCHAR(255) NOT NULL,
+  title TEXT,
+  sso LONGTEXT,
+  content LONGTEXT,
+  PRIMARY KEY (id),
+  UNIQUE KEY idx_mirror_conversation_user_conv (usertoken, convid),
+  KEY idx_mirror_conversation_user_token (usertoken),
+  KEY idx_mirror_conversation_conv_id (convid)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+" 2>&1 || true
+
 # Auto-register all grok_session tokens into grok_user
 echo "=== Auto-register tokens to grok_user ==="
 WAIT_LOOP=0
@@ -156,26 +190,17 @@ fi
 echo "=== Prepare lightweight login token ==="
 LOGIN_HTML="/app/resource/public/login.html"
 TOKEN_JS="/app/resource/public/token.js"
-LOGIN_TOKEN=$(mysql -u root -N -e "SELECT userToken FROM cool.grok_user WHERE userToken IS NOT NULL AND userToken != '' ORDER BY count ASC, updateTime ASC LIMIT 1;" 2>/dev/null | head -n 1 || true)
-if [ -z "$LOGIN_TOKEN" ]; then
-    LOGIN_TOKEN=$(mysql -u root -N -e "SELECT officialSession FROM cool.grok_session WHERE officialSession IS NOT NULL AND officialSession != '' ORDER BY count ASC, updateTime ASC LIMIT 1;" 2>/dev/null | head -n 1 || true)
-fi
-if [ -z "$LOGIN_TOKEN" ] && [ -f "/app/data/tokens.txt" ]; then
-    LOGIN_TOKEN=$(sed '/^[[:space:]]*$/d' /app/data/tokens.txt | head -n 1 || true)
-fi
-if [ -n "$LOGIN_TOKEN" ]; then
-    mysql -u root cool -e "
-INSERT INTO grok_user (createTime, updateTime, userToken, expireTime, isPro, remark, count)
-SELECT NOW(), NOW(), '$(printf '%s' "$LOGIN_TOKEN" | sed "s/'/''/g")', '2026-12-31 00:00:00', 0, 'auto-login-fallback', 0
-WHERE NOT EXISTS (SELECT 1 FROM grok_user WHERE userToken = '$(printf '%s' "$LOGIN_TOKEN" | sed "s/'/''/g")');
-" 2>&1 || true
-    ESCAPED_TOKEN=$(printf '%s' "$LOGIN_TOKEN" | sed "s/[\\&]/\\\\&/g; s/'/\\\\'/g")
-    printf "window.__GROK_LOGIN_TOKEN__ = '%s';\nwindow.__GROK_LOGIN_TOKEN_READY__ = true;\nwindow.__GROK_LOGIN_TOKEN_ERROR__ = '';\n" "$ESCAPED_TOKEN" > "$TOKEN_JS"
-    echo "Generated runtime token.js for lightweight login page"
-else
-    printf "window.__GROK_LOGIN_TOKEN__ = '';\nwindow.__GROK_LOGIN_TOKEN_READY__ = false;\nwindow.__GROK_LOGIN_TOKEN_ERROR__ = 'missing';\n" > "$TOKEN_JS"
-    echo "WARNING: No login token available; wrote empty token.js"
-fi
+printf "window.__GROK_LOGIN_TOKEN__ = '';\nwindow.__GROK_LOGIN_TOKEN_READY__ = false;\nwindow.__GROK_LOGIN_TOKEN_ERROR__ = 'broker';\n" > "$TOKEN_JS"
+echo "token.js will be served dynamically by mirror-broker"
+
+echo "=== Starting mirror broker and nginx ==="
+MIRROR_BROKER_HOST=127.0.0.1 MIRROR_BROKER_PORT=18081 python3 /app/mirror-broker.py &
+BROKER_PID=$!
+nginx -g 'daemon off;' &
+NGINX_PID=$!
+
+echo "mirror-broker PID: $BROKER_PID"
+echo "nginx PID: $NGINX_PID"
 
 echo "=== ALL INIT COMPLETE ==="
 

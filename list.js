@@ -37,6 +37,127 @@
         { id: 'grok-3-mini-companion', name: 'Mini', tag: 'Fast', color: '#4a9', quota: '10次/h' }
     ];
 
+    const RETRY_STATUS = new Set([401, 403, 429, 502, 503]);
+    const RETRY_TEXT_RE = /(quota|rate.?limit|too many|expired|unauthorized|forbidden|账号|限额|过期|频繁|不可用)/i;
+    const MIRROR_CLIENT_KEY = 'grok-mirror-client-id';
+    const MIRROR_CONV_KEY = 'grok-mirror-local-conversation-id';
+
+    function makeId(prefix) {
+        if (window.crypto && crypto.randomUUID) return prefix + '-' + crypto.randomUUID();
+        return prefix + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+    }
+
+    function getMirrorClientId() {
+        let id = localStorage.getItem(MIRROR_CLIENT_KEY);
+        if (!id) {
+            id = makeId('client');
+            localStorage.setItem(MIRROR_CLIENT_KEY, id);
+        }
+        return id;
+    }
+
+    function getLocalConversationId() {
+        let id = sessionStorage.getItem(MIRROR_CONV_KEY) || localStorage.getItem(MIRROR_CONV_KEY);
+        if (!id) {
+            id = makeId('conv');
+            sessionStorage.setItem(MIRROR_CONV_KEY, id);
+            localStorage.setItem(MIRROR_CONV_KEY, id);
+        }
+        return id;
+    }
+
+    function getCurrentSessionId() {
+        const raw = localStorage.getItem('grok-current-session-id') || '';
+        const parsed = Number(raw);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    }
+
+    function notifyMirror(message) {
+        let el = document.getElementById('grok-mirror-toast');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'grok-mirror-toast';
+            el.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:1000001;max-width:360px;padding:12px 14px;border-radius:10px;background:#111;color:#eee;border:1px solid #333;box-shadow:0 12px 36px rgba(0,0,0,.35);font-size:13px;line-height:1.45;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+            document.body.appendChild(el);
+        }
+        el.textContent = message;
+        clearTimeout(el._timer);
+        el._timer = setTimeout(() => el.remove(), 4500);
+    }
+
+    async function mirrorPost(path, payload) {
+        const res = await fetch(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload || {})
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || res.statusText || 'mirror request failed');
+        return data;
+    }
+
+    function signInWithToken(token, sessionId) {
+        if (!token) throw new Error('missing token');
+        try {
+            localStorage.setItem('grok-current-token', token);
+            localStorage.setItem('grok-current-session-id', String(sessionId || ''));
+        } catch (e) {}
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/sign-in';
+        form.style.display = 'none';
+        const tokenInput = document.createElement('input');
+        tokenInput.type = 'hidden';
+        tokenInput.name = 'usertoken';
+        tokenInput.value = token;
+        form.appendChild(tokenInput);
+        const actionInput = document.createElement('input');
+        actionInput.type = 'hidden';
+        actionInput.name = 'action';
+        actionInput.value = 'default';
+        form.appendChild(actionInput);
+        document.body.appendChild(form);
+        form.submit();
+    }
+
+    async function switchAccount(reason) {
+        notifyMirror('正在自动切换账号...');
+        try {
+            const currentSessionId = getCurrentSessionId();
+            if (reason) {
+                await mirrorPost('/__mirror/account/fail', {
+                    sessionId: currentSessionId,
+                    token: localStorage.getItem('grok-current-token') || '',
+                    reason: String(reason).slice(0, 500)
+                }).catch(() => null);
+            }
+            const next = await mirrorPost('/__mirror/account/next', { clientId: getMirrorClientId(), reason: reason || 'manual' });
+            notifyMirror('已找到新账号，正在重新接入...');
+            signInWithToken(next.token, next.sessionId);
+        } catch (err) {
+            notifyMirror('自动切号失败：' + (err && err.message ? err.message : err));
+        }
+    }
+
+    async function saveMirrorConversation(kind, data) {
+        const content = {
+            kind,
+            url: data.url || location.href,
+            model: getSelectedModel(),
+            timestamp: new Date().toISOString(),
+            payload: data.payload || null,
+            response: data.response || null,
+            status: data.status || null
+        };
+        return mirrorPost('/__mirror/conversation/save', {
+            clientId: getMirrorClientId(),
+            conversationId: getLocalConversationId(),
+            title: data.title || 'Grok 本地会话',
+            sessionId: getCurrentSessionId() || '',
+            content
+        }).catch(() => null);
+    }
+
     // Inject CSS
     const style = document.createElement('style');
     style.textContent = `
@@ -131,6 +252,27 @@
             transition: border-color 0.15s, background 0.15s;
         }
         .grok-panel-action:hover { border-color: #4a9; background: #151515; }
+        #grok-history-panel {
+            display: none;
+            position: fixed;
+            top: 198px;
+            right: 24px;
+            z-index: 999998;
+            width: 320px;
+            max-height: 420px;
+            overflow: auto;
+            padding: 12px;
+            background: #151515;
+            border: 1px solid #333;
+            border-radius: 12px;
+            color: #eee;
+            box-shadow: 0 20px 60px rgba(0,0,0,.45);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        #grok-history-panel.show { display: block; }
+        .grok-history-title { font-size: 13px; font-weight: 700; margin-bottom: 8px; }
+        .grok-history-item { padding: 9px 8px; border-radius: 8px; border: 1px solid #282828; margin-bottom: 6px; font-size: 12px; line-height: 1.4; }
+        .grok-history-time { color: #777; font-size: 11px; margin-top: 3px; }
         #grok-imagine-dialog {
             display: none;
             position: fixed;
@@ -235,6 +377,17 @@
         });
         menu.appendChild(imagine);
 
+        const historyBtn = document.createElement('button');
+        historyBtn.type = 'button';
+        historyBtn.className = 'grok-panel-action';
+        historyBtn.textContent = '本地统一历史';
+        historyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            menu.classList.remove('show');
+            toggleHistoryPanel();
+        });
+        menu.appendChild(historyBtn);
+
         const info = document.createElement('div');
         info.className = 'grok-panel-info';
         info.textContent = '账号池运行时注入 | 源码不暴露 Token';
@@ -264,11 +417,13 @@
         });
     }
 
-    // Intercept fetch to inject model
+    // Intercept fetch to inject model, persist local history and trigger silent account switch.
     const origFetch = window.fetch;
-    window.fetch = function(...args) {
+    window.fetch = async function(...args) {
         const url = typeof args[0] === 'string' ? args[0] : args[0]?.url;
-        if (url && url.includes('/rest/app-chat')) {
+        const isChat = !!(url && url.includes('/rest/app-chat'));
+        let requestPayload = null;
+        if (isChat) {
             try {
                 const body = args[1]?.body;
                 if (body && typeof body === 'string') {
@@ -278,11 +433,51 @@
                         parsed.model = selected;
                         args[1] = {...args[1], body: JSON.stringify(parsed)};
                     }
+                    requestPayload = parsed;
+                    saveMirrorConversation('request', { url, payload: parsed, title: extractPromptTitle(parsed) });
                 }
             } catch(e) {}
         }
-        return origFetch.apply(this, args);
+
+        let response;
+        try {
+            response = await origFetch.apply(this, args);
+        } catch (err) {
+            if (isChat) {
+                saveMirrorConversation('network-error', { url, payload: requestPayload, response: String(err), status: 0 });
+                switchAccount('network error: ' + (err && err.message ? err.message : err));
+            }
+            throw err;
+        }
+
+        if (isChat) {
+            const cloned = response.clone();
+            if (RETRY_STATUS.has(response.status)) {
+                saveMirrorConversation('error', { url, payload: requestPayload, status: response.status, response: response.statusText });
+                switchAccount('HTTP ' + response.status);
+            } else {
+                cloned.text().then((text) => {
+                    const shortText = text.slice(0, 8000);
+                    saveMirrorConversation('response', { url, payload: requestPayload, status: response.status, response: shortText, title: extractPromptTitle(requestPayload) });
+                    if (RETRY_TEXT_RE.test(shortText)) {
+                        switchAccount(shortText.slice(0, 500));
+                    } else {
+                        mirrorPost('/__mirror/account/success', { sessionId: getCurrentSessionId(), token: localStorage.getItem('grok-current-token') || '' }).catch(() => null);
+                    }
+                }).catch(() => null);
+            }
+        }
+        return response;
     };
+
+    function extractPromptTitle(payload) {
+        try {
+            const text = JSON.stringify(payload || {}).replace(/\\s+/g, ' ');
+            return text.slice(0, 80) || 'Grok 本地会话';
+        } catch (e) {
+            return 'Grok 本地会话';
+        }
+    }
 
     function createImagineDialog() {
         const dialog = document.createElement('div');
@@ -337,13 +532,46 @@
         });
     }
 
-    // Create switch account button (original functionality)
+    function createHistoryPanel() {
+        const panel = document.createElement('div');
+        panel.id = 'grok-history-panel';
+        panel.innerHTML = '<div class="grok-history-title">本地统一历史</div><div id="grok-history-list">加载中...</div>';
+        document.body.appendChild(panel);
+        return panel;
+    }
+
+    async function toggleHistoryPanel() {
+        const panel = document.getElementById('grok-history-panel') || createHistoryPanel();
+        panel.classList.toggle('show');
+        if (!panel.classList.contains('show')) return;
+        const list = document.getElementById('grok-history-list');
+        if (!list) return;
+        list.textContent = '加载中...';
+        try {
+            const res = await fetch('/__mirror/conversation/list?clientId=' + encodeURIComponent(getMirrorClientId()));
+            const data = await res.json();
+            const items = data.items || [];
+            if (!items.length) {
+                list.textContent = '暂无本地记录。发送一次消息后会自动保存。';
+                return;
+            }
+            list.innerHTML = items.map((item) => '<div class="grok-history-item"><div>' + escapeHtml(item.title || item.conversationId) + '</div><div class="grok-history-time">' + escapeHtml(item.updateTime || '') + '</div></div>').join('');
+        } catch (err) {
+            list.textContent = '历史加载失败：' + (err && err.message ? err.message : err);
+        }
+    }
+
+    function escapeHtml(value) {
+        return String(value).replace(/[&<>"']/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    }
+
+    // Create switch account button
     function createSwitchButton() {
         const btn = document.createElement('div');
         btn.id = 'grok-switch-btn';
         btn.style.cssText = 'position:fixed;top:140px;right:24px;z-index:999999;display:flex;align-items:center;gap:8px;padding:10px 16px;background:rgba(255,255,255,0.95);backdrop-filter:blur(8px);border:1px solid rgba(0,0,0,0.08);border-radius:9999px;box-shadow:0 4px 12px rgba(0,0,0,0.08);cursor:pointer;transition:all 0.2s;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#1a1a1a;font-size:13px;font-weight:500;';
-        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg><span>换号</span>';
-        btn.addEventListener('click', () => window.location.href = '/');
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg><span>无感换号</span>';
+        btn.addEventListener('click', () => switchAccount('manual switch'));
         document.body.appendChild(btn);
     }
 
@@ -351,6 +579,7 @@
         if (!document.getElementById('grok-panel')) createPanel();
         if (!document.getElementById('grok-switch-btn')) createSwitchButton();
         if (!document.getElementById('grok-imagine-dialog')) createImagineDialog();
+        if (!document.getElementById('grok-history-panel')) createHistoryPanel();
         patchImagineLinks();
         if (location.pathname === '/imagine') openImagineDialog();
         updatePanel();

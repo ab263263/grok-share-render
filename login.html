@@ -38,6 +38,7 @@ h1{text-align:center;font-size:24px;margin-bottom:8px}.desc{text-align:center;co
 window.__GROK_LOGIN_TOKEN__ = '';
 window.__GROK_LOGIN_TOKEN_READY__ = false;
 window.__GROK_LOGIN_TOKEN_ERROR__ = 'missing';
+window.__GROK_LOGIN_SESSION_ID__ = null;
 </script>
 <script src="/token.js"></script>
 <script>
@@ -65,6 +66,10 @@ window.__GROK_LOGIN_TOKEN_ERROR__ = 'missing';
       showError(reason === 'missing' ? '账号池未就绪，请稍后刷新重试。' : '登录令牌加载失败，请检查部署日志。');
       return;
     }
+    try {
+      localStorage.setItem('grok-current-session-id', String(window.__GROK_LOGIN_SESSION_ID__ || ''));
+      localStorage.setItem('grok-current-token', token);
+    } catch (e) {}
     btn.disabled = true;
     btn.textContent = '正在连接...';
     var form = document.createElement('form');
