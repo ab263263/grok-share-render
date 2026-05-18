@@ -186,11 +186,21 @@ else
     echo "Skip registration (sessions=$SESSION_COUNT, users=$USER_COUNT)"
 fi
 
-echo "=== Prepare lightweight login token ==="
+echo "=== Prepare login token fallback ==="
 LOGIN_HTML="/app/resource/public/login.html"
 TOKEN_JS="/app/resource/public/token.js"
-printf "window.__GROK_LOGIN_TOKEN__ = '';\nwindow.__GROK_LOGIN_TOKEN_READY__ = false;\nwindow.__GROK_LOGIN_TOKEN_ERROR__ = 'broker';\n" > "$TOKEN_JS"
-echo "token.js will be served dynamically by mirror-broker"
+FALLBACK_TOKEN=$(mysql -u root -N -e "SELECT userToken FROM cool.grok_user WHERE deleted_at IS NULL AND userToken IS NOT NULL AND userToken != '' AND (expireTime IS NULL OR expireTime > NOW()) ORDER BY COALESCE(count, 0) ASC, updateTime ASC, id ASC LIMIT 1;" 2>/dev/null || true)
+if [ -z "$FALLBACK_TOKEN" ]; then
+    FALLBACK_TOKEN=$(mysql -u root -N -e "SELECT officialSession FROM cool.grok_session WHERE deleted_at IS NULL AND status = 1 AND officialSession IS NOT NULL AND officialSession != '' ORDER BY COALESCE(count, 0) ASC, updateTime ASC, id ASC LIMIT 1;" 2>/dev/null || true)
+fi
+if [ -n "$FALLBACK_TOKEN" ]; then
+    TOKEN_ESCAPED=$(printf '%s' "$FALLBACK_TOKEN" | sed "s/\\\\/\\\\\\\\/g; s/'/\\\\'/g")
+    printf "window.__GROK_LOGIN_TOKEN__ = '%s';\nwindow.__GROK_LOGIN_TOKEN_READY__ = true;\nwindow.__GROK_LOGIN_TOKEN_ERROR__ = '';\n" "$TOKEN_ESCAPED" > "$TOKEN_JS"
+    echo "static token.js fallback ready"
+else
+    printf "window.__GROK_LOGIN_TOKEN__ = '';\nwindow.__GROK_LOGIN_TOKEN_READY__ = false;\nwindow.__GROK_LOGIN_TOKEN_ERROR__ = 'no-token';\n" > "$TOKEN_JS"
+    echo "WARNING: no token available for token.js fallback"
+fi
 
 echo "=== Starting mirror broker and nginx ==="
 MIRROR_BROKER_HOST=127.0.0.1 MIRROR_BROKER_PORT=18081 python3 /app/mirror-broker.py &
