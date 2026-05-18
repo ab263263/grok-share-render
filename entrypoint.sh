@@ -72,7 +72,7 @@ done
 # Import tokens if table is empty
 mkdir -p /app/data
 echo "=== Token import phase ==="
-TOKEN_COUNT=$(mysql -u root -N -e "SELECT COUNT(*) FROM cool.grok_session;" 2>/dev/null || echo "ERROR")
+TOKEN_COUNT=$(mysql -u root -N -e "SELECT COUNT(*) FROM cool.grok_session WHERE officialSession IS NOT NULL AND officialSession != '';" 2>/dev/null || echo "ERROR")
 echo "Current grok_session rows: $TOKEN_COUNT"
 
 if [ "$TOKEN_COUNT" = "0" ]; then
@@ -168,7 +168,7 @@ while [ $WAIT_LOOP -lt 60 ]; do
     WAIT_LOOP=$((WAIT_LOOP + 1))
 done
 
-SESSION_COUNT=$(mysql -u root -N -e "SELECT COUNT(*) FROM cool.grok_session;" 2>/dev/null || echo "0")
+SESSION_COUNT=$(mysql -u root -N -e "SELECT COUNT(*) FROM cool.grok_session WHERE officialSession IS NOT NULL AND officialSession != '';" 2>/dev/null || echo "0")
 USER_COUNT=$(mysql -u root -N -e "SELECT COUNT(*) FROM cool.grok_user;" 2>/dev/null || echo "0")
 echo "grok_session: $SESSION_COUNT, grok_user: $USER_COUNT"
 
