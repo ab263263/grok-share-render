@@ -190,8 +190,8 @@ echo "=== Prepare login token fallback ==="
 LOGIN_HTML="/app/resource/public/login.html"
 TOKEN_JS="/app/resource/public/token.js"
 FALLBACK_TOKEN=$(mysql -u root -N -e "SELECT userToken FROM cool.grok_user WHERE deleted_at IS NULL AND userToken IS NOT NULL AND userToken != '' AND (expireTime IS NULL OR expireTime > NOW()) ORDER BY COALESCE(count, 0) ASC, updateTime ASC, id ASC LIMIT 1;" 2>/dev/null || true)
-if [ -z "$FALLBACK_TOKEN" ]; then
-    FALLBACK_TOKEN=$(mysql -u root -N -e "SELECT officialSession FROM cool.grok_session WHERE deleted_at IS NULL AND status = 1 AND officialSession IS NOT NULL AND officialSession != '' ORDER BY COALESCE(count, 0) ASC, updateTime ASC, id ASC LIMIT 1;" 2>/dev/null || true)
+if [ -z "$FALLBACK_TOKEN" ] && [ -f "/app/data/tokens.txt" ]; then
+    FALLBACK_TOKEN=$(grep -m 1 -v '^[[:space:]]*$' /app/data/tokens.txt 2>/dev/null || true)
 fi
 if [ -n "$FALLBACK_TOKEN" ]; then
     TOKEN_ESCAPED=$(printf '%s' "$FALLBACK_TOKEN" | sed "s/\\\\/\\\\\\\\/g; s/'/\\\\'/g")
