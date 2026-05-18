@@ -53,10 +53,9 @@ fi
 # Start Go app (autoMigrate will create tables)
 echo "Starting grok-app..."
 cd /app
-export PORT=18080
-export SERVER_PORT=18080
-export APP_PORT=18080
-./main &
+PUBLIC_PORT="${PORT:-8001}"
+echo "Public nginx port: $PUBLIC_PORT"
+PORT=18080 SERVER_PORT=18080 APP_PORT=18080 ./main &
 APP_PID=$!
 
 # Wait for grok_session table (autoMigrate)
@@ -196,6 +195,8 @@ echo "token.js will be served dynamically by mirror-broker"
 echo "=== Starting mirror broker and nginx ==="
 MIRROR_BROKER_HOST=127.0.0.1 MIRROR_BROKER_PORT=18081 python3 /app/mirror-broker.py &
 BROKER_PID=$!
+sed -i "s/listen 8001;/listen ${PUBLIC_PORT};/" /etc/nginx/http.d/default.conf
+nginx -t
 nginx -g 'daemon off;' &
 NGINX_PID=$!
 
