@@ -75,7 +75,14 @@ echo "=== Token import phase ==="
 TOKEN_COUNT=$(mysql -u root -N -e "SELECT COUNT(*) FROM cool.grok_session WHERE officialSession IS NOT NULL AND officialSession != '';" 2>/dev/null || echo "ERROR")
 echo "Current grok_session rows: $TOKEN_COUNT"
 
-if [ "$TOKEN_COUNT" = "0" ]; then
+if [ "$TOKEN_COUNT" = "0" ] || [ "${FORCE_REIMPORT:-0}" = "1" ]; then
+    # If force reimport, truncate old data first
+    if [ "${FORCE_REIMPORT:-0}" = "1" ] && [ "$TOKEN_COUNT" != "0" ]; then
+        echo "FORCE_REIMPORT active: truncating old grok_session..."
+        mysql -u root cool -e "TRUNCATE TABLE grok_session;" 2>&1
+        mysql -u root cool -e "TRUNCATE TABLE grok_user;" 2>&1
+        mysql -u root cool -e "TRUNCATE TABLE mirror_account_state;" 2>&1
+    fi
     SQL_FILE="/app/data/tokens_import.sql"
     TOKENS_FILE="/app/data/tokens.txt"
 
