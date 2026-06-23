@@ -195,27 +195,61 @@ async def chat(req: ChatRequest):
     # 如果检测到目标，执行情报收集
     osint_results = None
     if detected_target:
-        # 同时执行：Grok 搜索 + Maigret 探测 + 游戏平台探测
+        # 解析用户指令，决定执行哪些工具
+        msg_lower = message.lower()
+        run_full_search = any(kw in msg_lower for kw in ["全站", "所有站点", "1836", "全部", "all"])
+        run_game_only = any(kw in msg_lower for kw in ["游戏平台", "游戏", "game", "lol", "wg", "steam"])
+        run_deep_analysis = any(kw in msg_lower for kw in ["深度分析", "深度", "分析", "deep", "analyze"])
+        run_grok_search = not run_game_only  # 默认执行 Grok 搜索，除非只搜游戏
+
         try:
-            # 1. Grok 实时搜索（Grok 自带的搜索爬虫）
-            grok_result = ai_analyzer.grok_search(detected_target)
-            
-            # 2. Maigret 探测（top 30 站点，快速扫描）
-            sites = maigret_sites.get_top_sites(30)
-            probe_results = await probes.probe_batch(sites, detected_target, 10)
-            found_probes = [r for r in probe_results if r.get("status") == "found"]
-            
-            # 3. 游戏平台探测（LoL/WG/Steam/Xbox/PSN 等 15 个平台）
-            game_results = await probes.probe_game_platforms(detected_target)
-            game_found = [r for r in game_results if r.get("status") == "found"]
-            
+            grok_result = None
+            found_probes = []
+            probe_total = 0
+            game_found = []
+            game_total = 0
+            deep_analysis = ""
+
+            # 1. Grok 实时搜索（除非只搜游戏平台）
+            if run_grok_search:
+                grok_result = ai_analyzer.grok_search(detected_target)
+
+            # 2. Maigret 探测
+            if run_full_search:
+                # 全站搜索（1836 站点）
+                sites = maigret_sites.get_top_sites(0)  # 0 = 全部
+                probe_results = await probes.probe_batch(sites, detected_target, 20)
+                found_probes = [r for r in probe_results if r.get("status") == "found"]
+                probe_total = len(probe_results)
+            elif not run_game_only:
+                # 默认 top 30 站点
+                sites = maigret_sites.get_top_sites(30)
+                probe_results = await probes.probe_batch(sites, detected_target, 10)
+                found_probes = [r for r in probe_results if r.get("status") == "found"]
+                probe_total = len(probe_results)
+
+            # 3. 游戏平台探测
+            if not run_full_search or run_game_only:
+                game_results = await probes.probe_game_platforms(detected_target)
+                game_found = [r for r in game_results if r.get("status") == "found"]
+                game_total = len(game_results)
+
+            # 4. 深度分析（使用推理模式）
+            if run_deep_analysis:
+                all_findings = found_probes + game_found
+                if grok_result and grok_result.get("platforms"):
+                    all_findings.extend(grok_result["platforms"])
+                deep_analysis = ai_analyzer.grok_deep_analysis(detected_target, all_findings)
+
             osint_results = {
                 "target": detected_target,
-                "grok_search": grok_result,
+                "grok_search": grok_result or {"summary": "", "platforms": [], "personal_info": {}},
                 "maigret_found": found_probes,
-                "maigret_total": len(probe_results),
+                "maigret_total": probe_total,
                 "game_found": game_found,
-                "game_total": len(game_results),
+                "game_total": game_total,
+                "deep_analysis": deep_analysis,
+                "mode": "full" if run_full_search else ("game" if run_game_only else "default"),
             }
         except Exception as e:
             osint_results = {"error": str(e)}
@@ -257,6 +291,9 @@ async def chat(req: ChatRequest):
                 system_content += f"- [{f.get('platform', '?')}] {f.get('url', '')}\n"
                 if f.get("snippet"):
                     system_content += f"  → {f['snippet'][:100]}\n"
+        deep_analysis = osint_results.get("deep_analysis", "")
+        if deep_analysis:
+            system_content += f"\n深度分析结果:\n{deep_analysis[:1500]}\n"
     
     messages.append({"role": "system", "content": system_content})
     
