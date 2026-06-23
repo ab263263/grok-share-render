@@ -151,6 +151,19 @@ async def grok_search(target: str):
     result = ai_analyzer.grok_search(target)
     return result
 
+@app.post("/api/game-probe")
+async def game_probe(username: str):
+    """探测所有游戏平台（LoL/WG/Steam/Xbox/PSN 等 15 个平台）"""
+    results = await probes.probe_game_platforms(username)
+    found = [r for r in results if r.get("status") == "found"]
+    return {
+        "username": username,
+        "total": len(results),
+        "found": len(found),
+        "results": results,
+        "found_results": found,
+    }
+
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
     """聊天 + 情报收集同步进行。
@@ -182,7 +195,7 @@ async def chat(req: ChatRequest):
     # 如果检测到目标，执行情报收集
     osint_results = None
     if detected_target:
-        # 同时执行：Grok 搜索 + Maigret 探测
+        # 同时执行：Grok 搜索 + Maigret 探测 + 游戏平台探测
         try:
             # 1. Grok 实时搜索（Grok 自带的搜索爬虫）
             grok_result = ai_analyzer.grok_search(detected_target)
@@ -192,11 +205,17 @@ async def chat(req: ChatRequest):
             probe_results = await probes.probe_batch(sites, detected_target, 10)
             found_probes = [r for r in probe_results if r.get("status") == "found"]
             
+            # 3. 游戏平台探测（LoL/WG/Steam/Xbox/PSN 等 15 个平台）
+            game_results = await probes.probe_game_platforms(detected_target)
+            game_found = [r for r in game_results if r.get("status") == "found"]
+            
             osint_results = {
                 "target": detected_target,
                 "grok_search": grok_result,
                 "maigret_found": found_probes,
                 "maigret_total": len(probe_results),
+                "game_found": game_found,
+                "game_total": len(game_results),
             }
         except Exception as e:
             osint_results = {"error": str(e)}
@@ -228,6 +247,13 @@ async def chat(req: ChatRequest):
         if maigret_found:
             system_content += f"\nMaigret 探测命中 ({len(maigret_found)} 个):\n"
             for f in maigret_found[:10]:
+                system_content += f"- [{f.get('platform', '?')}] {f.get('url', '')}\n"
+                if f.get("snippet"):
+                    system_content += f"  → {f['snippet'][:100]}\n"
+        game_found = osint_results.get("game_found", [])
+        if game_found:
+            system_content += f"\n游戏平台命中 ({len(game_found)} 个):\n"
+            for f in game_found[:10]:
                 system_content += f"- [{f.get('platform', '?')}] {f.get('url', '')}\n"
                 if f.get("snippet"):
                     system_content += f"  → {f['snippet'][:100]}\n"

@@ -163,9 +163,11 @@ async function sendMessage() {
         // 显示 Grok 搜索发现的平台
         const grokPlatforms = osint.grok_search?.platforms || [];
         const maigretFound = osint.maigret_found || [];
+        const gameFound = osint.game_found || [];
         const allFindings = [
-          ...grokPlatforms.map(p => ({ ...p, platform: p.platform || 'Grok搜索' })),
-          ...maigretFound.map(f => ({ platform: f.platform, url: f.url, snippet: f.snippet }))
+          ...grokPlatforms.map(p => ({ ...p, platform: 'Grok: ' + (p.platform || '?') })),
+          ...maigretFound.map(f => ({ platform: f.platform, url: f.url, snippet: f.snippet })),
+          ...gameFound.map(f => ({ platform: '🎮 ' + f.platform, url: f.url, snippet: f.snippet }))
         ];
         if (allFindings.length > 0) {
           addFindings(allFindings);

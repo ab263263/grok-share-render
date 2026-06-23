@@ -354,7 +354,311 @@ async def probe_platform(site: dict, username: str) -> dict:
         return await probe_reddit(username)
     if name == "Instagram":
         return await probe_instagram(username)
+    # 游戏平台专用探测器
+    game_probes = {
+        "Steam": probe_steam,
+        "SteamGroup": probe_steam_group,
+        "EpicGames": probe_epic_games,
+        "RiotGames": probe_riot_games,
+        "LeagueOfLegends": probe_lol,
+        "Valorant": probe_valorant,
+        "WarGaming": probe_wargaming,
+        "WorldOfTanks": probe_wargaming,
+        "WorldOfWarships": probe_wargaming,
+        "WorldOfWarplanes": probe_wargaming,
+        "XboxLive": probe_xbox,
+        "PlayStationNetwork": probe_psn,
+        "BattleNet": probe_battle_net,
+        "Twitch": probe_twitch,
+        "Discord": probe_discord,
+        "Roblox": probe_roblox,
+        "Minecraft": probe_minecraft,
+        "Fortnite": probe_fortnite,
+        "CSGO": probe_csgo,
+        "Faceit": probe_faceit,
+    }
+    if name in game_probes:
+        return await game_probes[name](username)
     return await probe_http(site, username)
+
+
+# ==================== 游戏平台探测器 ====================
+
+async def probe_steam(username: str) -> dict:
+    """Steam 个人资料探测"""
+    url = f"https://steamcommunity.com/id/{username}"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url, headers=DEFAULT_HEADERS)
+            html = resp.text
+            if resp.status_code == 200 and "profile_header" in html:
+                # 提取 Steam 信息
+                name_match = re.search(r'<span class="actual_persona_name"[^>]*>([^<]+)</span>', html)
+                level_match = re.search(r'<span class="friendPlayerLevelNum"[^>]*>(\d+)</span>', html)
+                snippet = ""
+                if name_match:
+                    snippet += f"名称: {name_match.group(1)} "
+                if level_match:
+                    snippet += f"等级: {level_match.group(1)}"
+                return {"status": "found", "platform": "Steam", "username": username, "url": url, "snippet": snippet}
+            return {"status": "not_found", "platform": "Steam", "username": username, "url": url}
+    except Exception as e:
+        return {"status": "error", "platform": "Steam", "username": username, "url": url, "error": str(e)[:100]}
+
+
+async def probe_steam_group(username: str) -> dict:
+    """Steam 群组探测"""
+    url = f"https://steamcommunity.com/groups/{username}"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url, headers=DEFAULT_HEADERS)
+            if resp.status_code == 200 and "groupContent" in resp.text:
+                return {"status": "found", "platform": "SteamGroup", "username": username, "url": url}
+            return {"status": "not_found", "platform": "SteamGroup", "username": username, "url": url}
+    except Exception as e:
+        return {"status": "error", "platform": "SteamGroup", "username": username, "url": url, "error": str(e)[:100]}
+
+
+async def probe_epic_games(username: str) -> dict:
+    """Epic Games Store 探测"""
+    url = f"https://store.epicgames.com/u/{username}"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url, headers=DEFAULT_HEADERS)
+            if resp.status_code == 200 and "user-card" in resp.text.lower():
+                return {"status": "found", "platform": "EpicGames", "username": username, "url": url}
+            return {"status": "not_found", "platform": "EpicGames", "username": username, "url": url}
+    except Exception as e:
+        return {"status": "error", "platform": "EpicGames", "username": username, "url": url, "error": str(e)[:100]}
+
+
+async def probe_riot_games(username: str) -> dict:
+    """Riot Games（LoL + Valorant）探测 - 通过 op.gg"""
+    # LoL 多个服务器
+    regions = ["na", "euw", "kr", "eune", "jp", "oce", "br", "las", "lan", "ru", "tr"]
+    found_regions = []
+    for region in regions[:5]:  # 限制前 5 个服务器避免太慢
+        url = f"https://lol.op.gg/summoners/{region}/{username}"
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                resp = await client.get(url, headers=DEFAULT_HEADERS)
+                if resp.status_code == 200 and "summoner" in resp.text.lower():
+                    found_regions.append({"region": region, "url": url})
+        except Exception:
+            pass
+    if found_regions:
+        return {
+            "status": "found",
+            "platform": "RiotGames",
+            "username": username,
+            "url": found_regions[0]["url"],
+            "snippet": f"在 {len(found_regions)} 个服务器找到: {', '.join(r['region'].upper() for r in found_regions)}",
+        }
+    return {"status": "not_found", "platform": "RiotGames", "username": username, "url": f"https://lol.op.gg/summoners/na/{username}"}
+
+
+async def probe_lol(username: str) -> dict:
+    """League of Legends 探测 - 通过 op.gg"""
+    return await probe_riot_games(username)
+
+
+async def probe_valorant(username: str) -> dict:
+    """Valorant 探测 - 通过 tracker.gg"""
+    url = f"https://tracker.gg/valorant/profile/riot/{username}"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url, headers=DEFAULT_HEADERS)
+            if resp.status_code == 200 and "profile" in resp.text.lower():
+                return {"status": "found", "platform": "Valorant", "username": username, "url": url}
+            return {"status": "not_found", "platform": "Valorant", "username": username, "url": url}
+    except Exception as e:
+        return {"status": "error", "platform": "Valorant", "username": username, "url": url, "error": str(e)[:100]}
+
+
+async def probe_wargaming(username: str) -> dict:
+    """War Gaming（World of Tanks/Warships/Warplanes）探测"""
+    # WoT 多个服务器
+    regions = ["na", "eu", "ru", "asia"]
+    found_regions = []
+    for region in regions:
+        url = f"https://worldoftanks.{region}/community/accounts/search/?query={username}"
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+                resp = await client.get(url, headers=DEFAULT_HEADERS)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("data") and len(data["data"]) > 0:
+                        account = data["data"][0]
+                        found_regions.append({
+                            "region": region,
+                            "url": f"https://worldoftanks.{region}/community/accounts/{account.get('account_id', '')}",
+                            "name": account.get("nickname", ""),
+                        })
+        except Exception:
+            pass
+    if found_regions:
+        return {
+            "status": "found",
+            "platform": "WarGaming",
+            "username": username,
+            "url": found_regions[0]["url"],
+            "snippet": f"在 {len(found_regions)} 个服务器找到: {', '.join(r['region'].upper() for r in found_regions)}",
+        }
+    return {"status": "not_found", "platform": "WarGaming", "username": username, "url": f"https://worldoftanks.com/community/accounts/search/?query={username}"}
+
+
+async def probe_xbox(username: str) -> dict:
+    """Xbox Live Gamertag 探测"""
+    url = f"https://www.xboxgamertag.com/search/{username}"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url, headers=DEFAULT_HEADERS)
+            if resp.status_code == 200 and "gamertag" in resp.text.lower():
+                return {"status": "found", "platform": "XboxLive", "username": username, "url": url}
+            return {"status": "not_found", "platform": "XboxLive", "username": username, "url": url}
+    except Exception as e:
+        return {"status": "error", "platform": "XboxLive", "username": username, "url": url, "error": str(e)[:100]}
+
+
+async def probe_psn(username: str) -> dict:
+    """PlayStation Network 探测 - 通过 PSNProfiles"""
+    url = f"https://psnprofiles.com/{username}"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url, headers=DEFAULT_HEADERS)
+            if resp.status_code == 200 and "profile" in resp.text.lower():
+                return {"status": "found", "platform": "PlayStationNetwork", "username": username, "url": url}
+            return {"status": "not_found", "platform": "PlayStationNetwork", "username": username, "url": url}
+    except Exception as e:
+        return {"status": "error", "platform": "PlayStationNetwork", "username": username, "url": url, "error": str(e)[:100]}
+
+
+async def probe_battle_net(username: str) -> dict:
+    """Battle.net 探测"""
+    url = f"https://starcraft2.com/legacy/profile/1/1/{username}"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url, headers=DEFAULT_HEADERS)
+            if resp.status_code == 200:
+                return {"status": "found", "platform": "BattleNet", "username": username, "url": url}
+            return {"status": "not_found", "platform": "BattleNet", "username": username, "url": url}
+    except Exception as e:
+        return {"status": "error", "platform": "BattleNet", "username": username, "url": url, "error": str(e)[:100]}
+
+
+async def probe_twitch(username: str) -> dict:
+    """Twitch 探测"""
+    url = f"https://www.twitch.tv/{username}"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url, headers=DEFAULT_HEADERS)
+            if resp.status_code == 200 and "channel" in resp.text.lower():
+                return {"status": "found", "platform": "Twitch", "username": username, "url": url}
+            return {"status": "not_found", "platform": "Twitch", "username": username, "url": url}
+    except Exception as e:
+        return {"status": "error", "platform": "Twitch", "username": username, "url": url, "error": str(e)[:100]}
+
+
+async def probe_discord(username: str) -> dict:
+    """Discord 探测（用户名无法直接探测，需要用户 ID）"""
+    # Discord 用户名无法通过 HTTP 直接探测
+    # 但可以检查 Discord 服务器邀请链接
+    return {"status": "unknown", "platform": "Discord", "username": username, "url": "", "snippet": "Discord 需要用户 ID，无法通过用户名直接探测"}
+
+
+async def probe_roblox(username: str) -> dict:
+    """Roblox 探测 - 通过 Roblox API"""
+    url = f"https://www.roblox.com/user.aspx?username={username}"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url, headers=DEFAULT_HEADERS)
+            if resp.status_code == 200 and "Profile" in resp.text:
+                return {"status": "found", "platform": "Roblox", "username": username, "url": resp.url}
+            return {"status": "not_found", "platform": "Roblox", "username": username, "url": url}
+    except Exception as e:
+        return {"status": "error", "platform": "Roblox", "username": username, "url": url, "error": str(e)[:100]}
+
+
+async def probe_minecraft(username: str) -> dict:
+    """Minecraft 探测 - 通过 NameMC"""
+    url = f"https://namemc.com/profile/{username}"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url, headers=DEFAULT_HEADERS)
+            if resp.status_code == 200 and "profile" in resp.text.lower():
+                return {"status": "found", "platform": "Minecraft", "username": username, "url": url}
+            return {"status": "not_found", "platform": "Minecraft", "username": username, "url": url}
+    except Exception as e:
+        return {"status": "error", "platform": "Minecraft", "username": username, "url": url, "error": str(e)[:100]}
+
+
+async def probe_fortnite(username: str) -> dict:
+    """Fortnite 探测 - 通过 tracker.gg"""
+    url = f"https://fortnitetracker.com/profile/all/{username}"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url, headers=DEFAULT_HEADERS)
+            if resp.status_code == 200 and "profile" in resp.text.lower():
+                return {"status": "found", "platform": "Fortnite", "username": username, "url": url}
+            return {"status": "not_found", "platform": "Fortnite", "username": username, "url": url}
+    except Exception as e:
+        return {"status": "error", "platform": "Fortnite", "username": username, "url": url, "error": str(e)[:100]}
+
+
+async def probe_csgo(username: str) -> dict:
+    """CS:GO/CS2 探测 - 通过 tracker.gg"""
+    url = f"https://tracker.gg/csgo/profile/steam/{username}"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url, headers=DEFAULT_HEADERS)
+            if resp.status_code == 200 and "profile" in resp.text.lower():
+                return {"status": "found", "platform": "CSGO", "username": username, "url": url}
+            return {"status": "not_found", "platform": "CSGO", "username": username, "url": url}
+    except Exception as e:
+        return {"status": "error", "platform": "CSGO", "username": username, "url": url, "error": str(e)[:100]}
+
+
+async def probe_faceit(username: str) -> dict:
+    """FACEIT 探测 - 通过 FACEIT API"""
+    url = f"https://www.faceit.com/en/players/{username}"
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            resp = await client.get(url, headers=DEFAULT_HEADERS)
+            if resp.status_code == 200 and "player" in resp.text.lower():
+                return {"status": "found", "platform": "Faceit", "username": username, "url": url}
+            return {"status": "not_found", "platform": "Faceit", "username": username, "url": url}
+    except Exception as e:
+        return {"status": "error", "platform": "Faceit", "username": username, "url": url, "error": str(e)[:100]}
+
+
+# 游戏平台列表（用于聊天端点快速探测）
+GAME_PLATFORMS = [
+    {"name": "Steam", "url": "https://steamcommunity.com/id/{username}"},
+    {"name": "SteamGroup", "url": "https://steamcommunity.com/groups/{username}"},
+    {"name": "EpicGames", "url": "https://store.epicgames.com/u/{username}"},
+    {"name": "RiotGames", "url": "https://lol.op.gg/summoners/na/{username}"},
+    {"name": "Valorant", "url": "https://tracker.gg/valorant/profile/riot/{username}"},
+    {"name": "WarGaming", "url": "https://worldoftanks.com/community/accounts/search/?query={username}"},
+    {"name": "XboxLive", "url": "https://www.xboxgamertag.com/search/{username}"},
+    {"name": "PlayStationNetwork", "url": "https://psnprofiles.com/{username}"},
+    {"name": "BattleNet", "url": "https://starcraft2.com/legacy/profile/1/1/{username}"},
+    {"name": "Twitch", "url": "https://www.twitch.tv/{username}"},
+    {"name": "Roblox", "url": "https://www.roblox.com/user.aspx?username={username}"},
+    {"name": "Minecraft", "url": "https://namemc.com/profile/{username}"},
+    {"name": "Fortnite", "url": "https://fortnitetracker.com/profile/all/{username}"},
+    {"name": "CSGO", "url": "https://tracker.gg/csgo/profile/steam/{username}"},
+    {"name": "Faceit", "url": "https://www.faceit.com/en/players/{username}"},
+]
+
+
+async def probe_game_platforms(username: str) -> list:
+    """探测所有游戏平台"""
+    tasks = []
+    for platform in GAME_PLATFORMS:
+        site = {"name": platform["name"], "url": platform["url"]}
+        tasks.append(probe_platform(site, username))
+    results = await asyncio.gather(*tasks, return_exceptions=False)
+    return list(results)
 
 
 async def probe_batch(
