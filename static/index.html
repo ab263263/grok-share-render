@@ -3,1241 +3,206 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Grok OSINT Agent · 智能情报收集</title>
+<title>OSINT 情报智能体 · 聊天模式</title>
 <style>
-:root{
-  --bg:#0a0a0a;--bg-elev:#141414;--bg-elev2:#1e1e1e;--border:#262626;--border-light:#3a3a3a;
-  --text:#e8e8e8;--text-dim:#888;--text-mute:#555;
-  --accent:#6b8afd;--accent-dim:#4a6bdb;--ok:#4ade80;--warn:#fbbf24;--danger:#f87171;--info:#38bdf8;
-  --mono:'SF Mono',Monaco,Consolas,'Liberation Mono',monospace;
-}
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;height:100vh;overflow:hidden}
-button{cursor:pointer;font-family:inherit;font-size:inherit;color:inherit;background:none;border:none}
-input,textarea,select{font-family:inherit;font-size:inherit;color:var(--text);background:var(--bg-elev);border:1px solid var(--border);border-radius:6px;padding:8px 10px;outline:none}
-input:focus,textarea:focus,select:focus{border-color:var(--accent)}
-a{color:var(--accent);text-decoration:none}
-a:hover{text-decoration:underline}
-
-.gate{position:fixed;inset:0;background:var(--bg);display:flex;align-items:center;justify-content:center;z-index:100}
-.gate-card{background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;padding:32px;width:340px;text-align:center}
-.gate-card h1{font-size:18px;margin-bottom:6px}
-.gate-card p{color:var(--text-dim);font-size:12px;margin-bottom:20px}
-.gate-card input{width:100%;margin-bottom:12px;text-align:center}
-.gate-card button{width:100%;padding:10px;background:var(--accent);color:#fff;border-radius:6px;font-weight:600}
-.gate-err{color:var(--danger);font-size:12px;margin-top:8px;min-height:16px}
-
-.app{display:none;height:100vh;flex-direction:column}
-.app.show{display:flex}
-.topbar{display:flex;align-items:center;gap:12px;padding:8px 16px;background:var(--bg-elev);border-bottom:1px solid var(--border);flex-shrink:0}
-.topbar .brand{font-weight:700;font-size:14px;display:flex;align-items:center;gap:6px}
-.topbar .brand span{color:var(--accent)}
-.topbar .spacer{flex:1}
-.topbar .stat{font-size:11px;color:var(--text-dim);padding:3px 8px;background:var(--bg-elev2);border-radius:6px}
-.topbar button{padding:5px 10px;border-radius:6px;color:var(--text-dim);font-size:12px}
-.topbar button:hover{background:var(--bg-elev2);color:var(--text)}
-
-.main{flex:1;display:grid;grid-template-columns:42% 1fr;gap:0;min-height:0}
-@media(max-width:1000px){.main{grid-template-columns:1fr}}
-
-/* Left: agent conversation */
-.left{background:var(--bg);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
-.left-hd{padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text-dim);display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
-.agent-stream{flex:1;overflow-y:auto;padding:12px}
-.agent-msg{margin-bottom:12px;font-size:13px;animation:fadein .3s}
-@keyframes fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
-.agent-msg .role{font-size:11px;color:var(--text-dim);margin-bottom:3px;display:flex;align-items:center;gap:6px}
-.agent-msg .role .avatar{width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10px;font-weight:700}
-.agent-msg.user .role .avatar{background:var(--accent);color:#fff}
-.agent-msg.ai .role .avatar{background:var(--ok);color:#000}
-.agent-msg.action .role .avatar{background:var(--warn);color:#000}
-.agent-msg.system .role .avatar{background:var(--text-mute);color:#fff}
-.agent-msg .body{padding-left:24px;color:var(--text);white-space:pre-wrap;word-break:break-word;line-height:1.6}
-.agent-msg.ai .body{background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-left:24px}
-.agent-msg.action .body{color:var(--warn);font-family:var(--mono);font-size:12px}
-.agent-msg.system .body{color:var(--text-mute);font-size:12px;font-style:italic}
-.agent-msg.found .body{color:var(--ok)}
-.agent-msg.error .body{color:var(--danger)}
-
-.input-bar{padding:10px 14px;border-top:1px solid var(--border);background:var(--bg-elev);flex-shrink:0}
-.input-bar .row1{display:flex;gap:6px;margin-bottom:6px}
-.input-bar input{flex:1}
-.input-bar .btn-send{padding:8px 16px;background:var(--accent);color:#fff;border-radius:6px;font-weight:600;font-size:13px}
-.input-bar .btn-send:disabled{background:var(--bg-elev2);color:var(--text-mute);cursor:not-allowed}
-.input-bar .hint{font-size:11px;color:var(--text-mute)}
-.input-bar .quick{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
-.input-bar .quick button{padding:3px 8px;background:var(--bg-elev2);border:1px solid var(--border);border-radius:4px;font-size:11px;color:var(--text-dim)}
-.input-bar .quick button:hover{border-color:var(--border-light);color:var(--text)}
-
-/* Right: findings + archive */
-.right{display:flex;flex-direction:column;min-height:0;background:var(--bg)}
-.right-tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0}
-.right-tab{padding:10px 16px;font-size:12px;color:var(--text-dim);border-bottom:2px solid transparent;cursor:pointer}
-.right-tab.active{color:var(--text);border-bottom-color:var(--accent)}
-.right-tab .count{font-size:10px;background:var(--bg-elev2);padding:1px 6px;border-radius:8px;margin-left:4px}
-.right-content{flex:1;overflow-y:auto;padding:14px}
-
-.findings{display:flex;flex-direction:column;gap:8px}
-.finding{background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px}
-.finding.found{border-left:3px solid var(--ok)}
-.finding.notfound{border-left:3px solid var(--danger);opacity:.6}
-.finding.pending{border-left:3px solid var(--warn)}
-.finding .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
-.finding .platform{font-weight:600;color:var(--text)}
-.finding .badge{font-size:10px;padding:2px 6px;border-radius:3px}
-.finding .badge.found{background:rgba(74,222,128,.15);color:var(--ok)}
-.finding .badge.notfound{background:rgba(248,113,113,.15);color:var(--danger)}
-.finding .badge.pending{background:rgba(251,191,36,.15);color:var(--warn)}
-.finding .url{color:var(--accent);font-family:var(--mono);font-size:11px;word-break:break-all;margin-top:3px}
-.finding .meta{color:var(--text-mute);font-size:10px;margin-top:3px}
-.finding .snippet{color:var(--text-dim);margin-top:6px;font-size:11px;max-height:80px;overflow-y:auto;background:var(--bg);padding:6px;border-radius:4px;font-family:var(--mono)}
-
-.archive-body{font-size:13px;line-height:1.7;color:var(--text)}
-.archive-body h1,.archive-body h2,.archive-body h3{margin:14px 0 6px;color:var(--text)}
-.archive-body h1{font-size:16px}.archive-body h2{font-size:14px}.archive-body h3{font-size:13px}
-.archive-body p{margin:6px 0}
-.archive-body ul,.archive-body ol{margin:6px 0;padding-left:20px}
-.archive-body li{margin:2px 0}
-.archive-body code{background:var(--bg-elev2);padding:1px 5px;border-radius:3px;font-family:var(--mono);font-size:11px}
-.archive-body a{color:var(--accent)}
-.archive-body strong{color:var(--text);font-weight:600}
-.archive-body hr{border:none;border-top:1px solid var(--border);margin:12px 0}
-.archive-body blockquote{border-left:3px solid var(--accent);padding-left:12px;color:var(--text-dim);margin:8px 0}
-
-.archive-actions{display:flex;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);flex-wrap:wrap}
-.archive-actions button{padding:6px 10px;background:var(--bg-elev2);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text-dim)}
-.archive-actions button:hover{border-color:var(--border-light);color:var(--text)}
-
-.history-item{background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;font-size:12px}
-.history-item:hover{background:var(--bg-elev2)}
-.history-item .name{color:var(--text);font-weight:500}
-.history-item .meta{color:var(--text-mute);font-size:10px;margin-top:2px}
-
-.empty{text-align:center;padding:60px 20px;color:var(--text-mute)}
-.empty .icon{font-size:40px;margin-bottom:8px;opacity:.4}
-
-.modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:50}
-.modal-mask.open{display:flex}
-.modal{background:var(--bg-elev);border:1px solid var(--border);border-radius:12px;padding:24px;width:440px;max-width:90vw}
-.modal h3{font-size:15px;margin-bottom:16px}
-.modal .row{margin-bottom:12px}
-.modal .row label{display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px}
-.modal .row input{width:100%}
-.modal-actions{display:flex;gap:8px;margin-top:16px}
-.modal-actions button{flex:1;padding:8px;border-radius:6px;font-size:13px}
-
-.toast{position:fixed;bottom:20px;right:20px;background:var(--bg-elev);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:13px;z-index:200;max-width:320px}
-.toast.ok{border-color:var(--ok);color:var(--ok)}
-.toast.err{border-color:var(--danger);color:var(--danger)}
-
-/* Spinner */
-.spinner{display:inline-block;width:12px;height:12px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0f; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
+.header { background: linear-gradient(135deg, #1a1a2e, #16213e); padding: 12px 20px; border-bottom: 1px solid #333; display: flex; align-items: center; gap: 12px; }
+.header h1 { font-size: 18px; background: linear-gradient(90deg, #00f2fe, #4facfe); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.header .status { margin-left: auto; font-size: 12px; color: #888; }
+.header .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #4ade80; margin-right: 4px; }
+.chat-container { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.message { max-width: 80%; padding: 12px 16px; border-radius: 12px; line-height: 1.6; word-wrap: break-word; }
+.message.user { align-self: flex-end; background: linear-gradient(135deg, #4facfe, #00f2fe); color: #000; }
+.message.ai { align-self: flex-start; background: #1e1e30; border: 1px solid #333; }
+.message.ai pre { background: #0d1117; padding: 8px 12px; border-radius: 6px; margin: 8px 0; overflow-x: auto; font-size: 13px; }
+.message.ai a { color: #4facfe; text-decoration: none; }
+.message.ai a:hover { text-decoration: underline; }
+.message.system { align-self: center; background: transparent; color: #666; font-size: 12px; text-align: center; }
+.findings { margin-top: 8px; padding: 8px; background: #0d1117; border-radius: 6px; border-left: 3px solid #4facfe; }
+.findings-title { font-size: 12px; color: #4facfe; margin-bottom: 4px; }
+.finding-item { font-size: 13px; padding: 2px 0; }
+.finding-item a { color: #4facfe; }
+.input-area { padding: 16px 20px; background: #1a1a2e; border-top: 1px solid #333; display: flex; gap: 12px; }
+.input-area input { flex: 1; padding: 12px 16px; background: #0d1117; border: 1px solid #333; border-radius: 8px; color: #e0e0e0; font-size: 14px; outline: none; }
+.input-area input:focus { border-color: #4facfe; }
+.input-area button { padding: 12px 24px; background: linear-gradient(135deg, #4facfe, #00f2fe); border: none; border-radius: 8px; color: #000; font-weight: 600; cursor: pointer; transition: opacity 0.2s; }
+.input-area button:hover { opacity: 0.9; }
+.input-area button:disabled { opacity: 0.5; cursor: not-allowed; }
+.typing { display: inline-block; width: 6px; height: 16px; background: #4facfe; animation: blink 1s infinite; margin-left: 4px; vertical-align: middle; }
+@keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+.suggestions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.suggestion { padding: 4px 12px; background: #1e1e30; border: 1px solid #333; border-radius: 16px; font-size: 12px; color: #888; cursor: pointer; transition: all 0.2s; }
+.suggestion:hover { border-color: #4facfe; color: #4facfe; }
 </style>
 </head>
 <body>
-
-<div class="gate" id="gate">
-  <div class="gate-card">
-    <h1>🕵️ Grok <span>OSINT Agent</span></h1>
-    <p>智能体情报收集 · 多源并发 · 变体联想</p>
-    <input type="password" id="pwdInput" placeholder="访问密码" autocomplete="off">
-    <button id="enterBtn">进入</button>
-    <div class="gate-err" id="gateErr"></div>
-  </div>
+<div class="header">
+  <h1>OSINT 情报智能体</h1>
+  <span style="font-size:12px;color:#666;">Grok 4.20 + Maigret 1836 站点</span>
+  <div class="status"><span class="dot"></span><span id="status-text">就绪</span></div>
 </div>
-
-<div class="app" id="app">
-  <div class="topbar">
-    <div class="brand">🕵️ Grok <span>OSINT Agent</span></div>
-    <div class="spacer"></div>
-    <div class="stat" id="apiStat">📡 …</div>
-    <div class="stat" id="agentStat" style="display:none">🤖 待命</div>
-    <button id="settingsBtn">⚙️</button>
-    <button id="logoutBtn">登出</button>
-  </div>
-
-  <div class="main">
-    <!-- Left: Agent conversation -->
-    <div class="left">
-      <div class="left-hd">
-        <span>🤖 智能体对话流</span>
-        <span id="streamStat" style="font-size:11px">空闲</span>
-      </div>
-      <div class="agent-stream" id="agentStream">
-        <div class="agent-msg system">
-          <div class="role"><span class="avatar">S</span><span>系统</span></div>
-          <div class="body">输入目标（用户名/姓名/ID），智能体将自动规划搜索策略、生成变体、并发探测多平台、迭代分析。</div>
-        </div>
-      </div>
-      <div class="input-bar">
-        <div class="row1">
-          <input type="text" id="userInput" placeholder="例如：Elon Musk @elonmusk 或 torvalds" autocomplete="off">
-          <button class="btn-send" id="sendBtn">发送</button>
-        </div>
-        <div class="hint">回车发送 · 智能体自主决定搜索策略</div>
-        <div class="quick">
-          <button data-q="Elon Musk">Elon Musk</button>
-          <button data-q="torvalds">torvalds</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Right: findings + archive -->
-    <div class="right">
-      <div class="right-tabs">
-        <div class="right-tab active" data-tab="findings">线索 <span class="count" id="findingsCount">0</span></div>
-        <div class="right-tab" data-tab="archive">档案</div>
-        <div class="right-tab" data-tab="history">历史</div>
-      </div>
-      <div class="right-content" id="rightContent">
-        <div id="tab-findings" class="tab-pane">
-          <div class="empty" id="findingsEmpty">
-            <div class="icon">🔍</div>
-            <p>等待智能体开始搜索...</p>
-          </div>
-          <div class="findings" id="findingsList" style="display:none"></div>
-        </div>
-        <div id="tab-archive" class="tab-pane" style="display:none">
-          <div class="empty" id="archiveEmpty">
-            <div class="icon">📋</div>
-            <p>情报档案将在搜索完成后生成</p>
-          </div>
-          <div id="archiveBox" style="display:none">
-            <div class="archive-body" id="archiveBody"></div>
-            <div class="archive-actions">
-              <button id="exportMd">⬇ Markdown</button>
-              <button id="exportJson">⬇ JSON</button>
-              <button id="copyMd">📋 复制</button>
-              <button id="regenBtn">🔄 重新整理</button>
-            </div>
-          </div>
-        </div>
-        <div id="tab-history" class="tab-pane" style="display:none">
-          <div id="historyList"></div>
-        </div>
-      </div>
+<div class="chat-container" id="chat">
+  <div class="message ai">
+    你好！我是 OSINT 情报分析智能体。输入用户名即可开始调查，例如：<br>
+    <div class="suggestions">
+      <span class="suggestion" onclick="sendSuggestion('搜索 darkyokail')">搜索 darkyokail</span>
+      <span class="suggestion" onclick="sendSuggestion('查找 johnsmith')">查找 johnsmith</span>
+      <span class="suggestion" onclick="sendSuggestion('@testuser')">搜索 @testuser</span>
     </div>
   </div>
 </div>
-
-<div class="modal-mask" id="settingsModal">
-  <div class="modal">
-    <h3>⚙️ 设置</h3>
-    <div class="row">
-      <label>Grok API Base URL</label>
-      <input type="text" id="cfgBaseUrl" value="https://grok2api-2-hpc2.onrender.com">
-    </div>
-    <div class="row">
-      <label>API Key</label>
-      <input type="text" id="cfgApiKey" value="c9d05cfdfd6b4dbc8f13f474">
-    </div>
-    <div class="row">
-      <label>规划模型（生成策略/变体）</label>
-      <input type="text" id="cfgPlanModel" value="grok-4.20-fast">
-    </div>
-    <div class="row">
-      <label>分析模型（生成档案）</label>
-      <input type="text" id="cfgAnalyzeModel" value="grok-4.20-0309-non-reasoning">
-    </div>
-    <div class="row">
-      <label>并发数（平台探测）</label>
-      <input type="number" id="cfgConcurrency" value="5" min="1" max="10">
-    </div>
-    <div class="modal-actions">
-      <button class="btn-cancel" id="settingsCancel">取消</button>
-      <button class="btn-save" id="settingsSave">保存</button>
-    </div>
-  </div>
+<div class="input-area">
+  <input type="text" id="input" placeholder="输入用户名或消息..." onkeypress="if(event.key==='Enter')sendMessage()">
+  <button id="send-btn" onclick="sendMessage()">发送</button>
 </div>
-
 <script>
-const PASSWORD='2632643526';
-const CFG_KEY='osint_agent_cfg_v1';
-const HIST_KEY='osint_agent_hist_v1';
+const API_BASE = window.location.origin;
+const chat = document.getElementById('chat');
+const input = document.getElementById('input');
+const sendBtn = document.getElementById('send-btn');
+const statusText = document.getElementById('status-text');
+let history = [];
 
-let cfg={baseUrl:'https://grok2api-2-hpc2.onrender.com',apiKey:'c9d05cfdfd6b4dbc8f13f474',planModel:'grok-4.20-fast',analyzeModel:'grok-4.20-0309-non-reasoning',concurrency:5};
-try{cfg=Object.assign(cfg,JSON.parse(localStorage.getItem(CFG_KEY)||'{}'))}catch(e){}
-let history=[];
-try{history=JSON.parse(localStorage.getItem(HIST_KEY)||'[]')}catch(e){}
-let findings=[];
-let currentArchive='';
-let isRunning=false;
-
-const $=id=>document.getElementById(id);
-
-// Gate
-$('enterBtn').onclick=()=>{
-  if($('pwdInput').value===PASSWORD){localStorage.setItem('osint_agent_auth','1');showApp()}
-  else{$('gateErr').textContent='密码错误';$('pwdInput').value='';$('pwdInput').focus()}
-};
-$('pwdInput').addEventListener('keydown',e=>{if(e.key==='Enter')$('enterBtn').click()});
-if(localStorage.getItem('osint_agent_auth')==='1')showApp();
-
-function showApp(){
-  $('gate').style.display='none';
-  $('app').classList.add('show');
-  pingApi();
-  renderHistory();
-  renderFindings();
-}
-
-$('logoutBtn').onclick=()=>{localStorage.removeItem('osint_agent_auth');location.reload()};
-
-// Settings
-$('settingsBtn').onclick=()=>{
-  $('cfgBaseUrl').value=cfg.baseUrl;
-  $('cfgApiKey').value=cfg.apiKey;
-  $('cfgPlanModel').value=cfg.planModel;
-  $('cfgAnalyzeModel').value=cfg.analyzeModel;
-  $('cfgConcurrency').value=cfg.concurrency;
-  $('settingsModal').classList.add('open');
-};
-$('settingsCancel').onclick=()=>$('settingsModal').classList.remove('open');
-$('settingsSave').onclick=()=>{
-  cfg.baseUrl=$('cfgBaseUrl').value.trim().replace(/\/$/,'');
-  cfg.apiKey=$('cfgApiKey').value.trim();
-  cfg.planModel=$('cfgPlanModel').value.trim();
-  cfg.analyzeModel=$('cfgAnalyzeModel').value.trim();
-  cfg.concurrency=parseInt($('cfgConcurrency').value)||5;
-  localStorage.setItem(CFG_KEY,JSON.stringify(cfg));
-  $('settingsModal').classList.remove('open');
-  pingApi();
-};
-
-// Tabs
-document.querySelectorAll('.right-tab').forEach(t=>{
-  t.onclick=()=>{
-    document.querySelectorAll('.right-tab').forEach(x=>x.classList.remove('active'));
-    t.classList.add('active');
-    document.querySelectorAll('.tab-pane').forEach(p=>p.style.display='none');
-    $('tab-'+t.dataset.tab).style.display='block';
-  };
-});
-
-// Quick buttons
-document.querySelectorAll('.quick button').forEach(b=>{
-  b.onclick=()=>$('userInput').value=b.dataset.q;
-});
-
-async function pingApi(){
-  try{
-    const r=await fetch(cfg.baseUrl+'/v1/models',{headers:{'Authorization':'Bearer '+cfg.apiKey}});
-    if(r.ok){const j=await r.json();$('apiStat').textContent='📡 '+(j.data?.length||0)+' 模型';$('apiStat').style.color='var(--ok)'}
-    else{$('apiStat').textContent='📡 '+r.status;$('apiStat').style.color='var(--danger)'}
-  }catch(e){$('apiStat').textContent='📡 离线';$('apiStat').style.color='var(--danger)'}
-}
-
-// === Agent stream ===
-function pushMsg(role,label,body,opts){
-  const stream=$('agentStream');
-  const div=document.createElement('div');
-  div.className='agent-msg '+role+(opts?.cls?' '+opts.cls:'');
-  const avatarChar={user:'U',ai:'G',action:'⚡',system:'S'}[role]||'?';
-  div.innerHTML='<div class="role"><span class="avatar">'+avatarChar+'</span><span>'+esc(label)+'</span></div><div class="body">'+body+'</div>';
-  stream.appendChild(div);
-  stream.scrollTop=stream.scrollHeight;
+function addMessage(content, type) {
+  const div = document.createElement('div');
+  div.className = 'message ' + type;
+  if (type === 'ai') {
+    div.innerHTML = formatMarkdown(content);
+  } else {
+    div.textContent = content;
+  }
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
   return div;
 }
 
-function updateMsg(div,body){
-  const bodyEl=div.querySelector('.body');
-  bodyEl.innerHTML=body;
-  $('agentStream').scrollTop=$('agentStream').scrollHeight;
+function formatMarkdown(text) {
+  if (!text) return '';
+  // 转义 HTML
+  text = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // 代码块
+  text = text.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre>$2</pre>');
+  // 行内代码
+  text = text.replace(/`([^`]+)`/g, '<code style="background:#0d1117;padding:2px 6px;border-radius:3px;">$1</code>');
+  // Markdown 链接
+  text = text.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+  // 引用链接 [[N]](url)
+  text = text.replace(/\[\[(\d+)\]\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank">[$1]</a>');
+  // 裸 URL
+  text = text.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank">$1</a>');
+  // 粗体
+  text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  // 换行
+  text = text.replace(/\n/g, '<br>');
+  return text;
 }
 
-function setStreamStat(txt,running){
-  $('streamStat').textContent=txt;
-  isRunning=running;
-  $('sendBtn').disabled=running;
-  $('agentStat').style.display=running?'inline-block':'none';
-  $('agentStat').textContent=running?'🤖 工作中':'🤖 待命';
-}
-
-// === Findings ===
-function renderFindings(){
-  const list=$('findingsList');
-  const empty=$('findingsEmpty');
-  $('findingsCount').textContent=findings.length;
-  if(!findings.length){empty.style.display='block';list.style.display='none';return}
-  empty.style.display='none';list.style.display='flex';
-  list.innerHTML=findings.map((f,i)=>{
-    const cls=f.status==='found'?'found':f.status==='notfound'?'notfound':'pending';
-    const badge=f.status==='found'?'✓ 命中':f.status==='notfound'?'✗ 未找到':'⏳ 探测中';
-    return '<div class="finding '+cls+'">'+
-      '<div class="top"><span class="platform">'+esc(f.platform)+'</span><span class="badge '+f.status+'">'+badge+'</span></div>'+
-      (f.url?'<div class="url"><a href="'+esc(f.url)+'" target="_blank" rel="noopener">'+esc(f.url)+'</a></div>':'')+
-      (f.username?'<div class="meta">用户名: '+esc(f.username)+'</div>':'')+
-      (f.snippet?'<div class="snippet">'+esc(f.snippet).slice(0,300)+'</div>':'')+
-      (f.error?'<div class="meta" style="color:var(--danger)">'+esc(f.error)+'</div>':'')+
-      '</div>';
-  }).join('');
-}
-
-function addFinding(f){
-  findings.push(f);
-  renderFindings();
-}
-
-function updateFinding(idx,updates){
-  Object.assign(findings[idx],updates);
-  renderFindings();
-}
-
-// === AI calls ===
-async function aiCall(prompt,model){
-  const r=await fetch(cfg.baseUrl+'/v1/chat/completions',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.apiKey},
-    body:JSON.stringify({model:model||cfg.planModel,messages:[{role:'user',content:prompt}],stream:false,temperature:0.4,max_tokens:4000})
+function addFindings(findings) {
+  if (!findings || findings.length === 0) return;
+  const div = document.createElement('div');
+  div.className = 'findings';
+  div.innerHTML = `<div class="findings-title">情报发现 (${findings.length})</div>`;
+  findings.slice(0, 15).forEach(f => {
+    const item = document.createElement('div');
+    item.className = 'finding-item';
+    const url = f.url || '';
+    const platform = f.platform || '?';
+    const snippet = f.snippet ? ` → ${f.snippet.substring(0, 80)}` : '';
+    item.innerHTML = `[${platform}] <a href="${url}" target="_blank">${url}</a>${snippet}`;
+    div.appendChild(item);
   });
-  if(!r.ok){const t=await r.text();throw new Error('API '+r.status+': '+t.slice(0,200))}
-  const j=await r.json();
-  return j.choices?.[0]?.message?.content||'';
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
 }
 
-// === Maigret sites (top 150 by Alexa rank, from soxoj/maigret) ===
-const MAIGRET_SITES=[{"name":"Facebook","url":"https://www.facebook.com/{u}","nf":["rsrcTags"],"pf":["first_name"],"rank":2,"tags":["social"]},{"name":"YouTube","url":"https://www.youtube.com/@{u}/about","nf":["404 Not Found"],"pf":["visitorData","userAgent"],"rank":3,"tags":["video"]},{"name":"Instagram","url":"https://www.instagram.com/{u}/","nf":["Sorry, this page isn&#39;t available.","dialog-404"],"pf":["\"biography\""],"rank":4,"tags":["photo","social"]},{"name":"Twitter","url":"https://twitter.com/{u}","nf":[" not found"],"pf":["\"legacy\""],"rank":5,"tags":["messaging","social"]},{"name":"LinkedIn","url":"https://linkedin.com/in/{u}","nf":[],"pf":[],"rank":6,"tags":["professional","social"]},{"name":"GitHub","url":"https://github.com/{u}","nf":[],"pf":[],"rank":10,"tags":["coding"]},{"name":"WordPressOrg","url":"https://profiles.wordpress.org/{u}/","nf":[],"pf":[],"rank":12,"tags":["blog","coding","in"]},{"name":"GooglePlayStore","url":"https://play.google.com/store/apps/developer?id={u}","nf":[],"pf":[],"rank":14,"tags":["apps"]},{"name":"Wikipedia","url":"https://en.wikipedia.org/wiki/User:{u}","nf":["\"missing\""],"pf":["\"userid\""],"rank":15,"tags":["wiki"]},{"name":"Google Maps","url":"https://www.google.com/maps/contrib/{u}","nf":["My Contributions to Google Maps"],"pf":["[\"Contributions by"],"rank":17,"tags":["maps"]},{"name":"Pinterest","url":"https://www.pinterest.com/{u}/","nf":["@undefined"],"pf":["<!-- --> followers","<!-- --> following","<!-- --> подписчиков"],"rank":18,"tags":["art","photo","sharing","social"]},{"name":"Vimeo","url":"https://vimeo.com/{u}","nf":[],"pf":[],"rank":20,"tags":["video"]},{"name":"TikTok","url":"https://www.tiktok.com/@{u}","nf":["serverCode\":404"],"pf":["\"nickname\":"],"rank":24,"tags":["social","video"]},{"name":"Amazon","url":"https://amazon.com/author/{u}","nf":["Sorry! We couldn't find that page"],"pf":["authorName"],"rank":29,"tags":["shopping","us"]},{"name":"Bit.ly","url":"https://bit.ly/{u}","nf":[],"pf":[],"rank":32,"tags":["links"]},{"name":"WordPress","url":"https://{u}.wordpress.com/","nf":[],"pf":[],"rank":34,"tags":["blog"]},{"name":"Google Plus (archived)","url":"https://web.archive.org/web/*/plus.google.com/{u}*","nf":["[]"],"pf":["original"],"rank":41,"tags":["social"]},{"name":"Telegram","url":"https://t.me/{u}","nf":["<meta name=\"robots\" content=\"noindex, nofollow\">","<meta property=\"twitter:title\" content=\"Telegram: Contact"],"pf":[],"rank":42,"tags":["messaging"]},{"name":"Reddit","url":"https://www.reddit.com/user/{u}","nf":["Not Found"],"pf":["\"name\":"],"rank":49,"tags":["discussion","news","social"]},{"name":"Tumblr","url":"https://www.tumblr.com/{u}","nf":["Not found.",":404,","userAgent"],"pf":["profile"," title="],"rank":56,"tags":["blog","social"]},{"name":"Spotify","url":"https://open.spotify.com/user/{u}","nf":[],"pf":[],"rank":60,"tags":["music"]},{"name":"Archive.org","url":"https://archive.org/details/@{u}","nf":["cannot find account"],"pf":["archive.org Member"],"rank":61,"tags":["archive"]},{"name":"Flickr","url":"https://www.flickr.com/photos/{u}","nf":[],"pf":[],"rank":64,"tags":["photo"]},{"name":"Flickr Groups","url":"https://www.flickr.com/groups/{u}","nf":[":404,","registryName","parentName"],"pf":["username","\tstyle=","og:title"],"rank":64,"tags":["photo"]},{"name":"Medium","url":"https://medium.com/@{u}","nf":[],"pf":[],"rank":66,"tags":["blog","writing"]},{"name":"SoundCloud","url":"https://soundcloud.com/{u}","nf":["SoundCloud - Hear the world’s sounds"],"pf":["\"hydratable\":\"user\""],"rank":70,"tags":["music"]},{"name":"SourceForge","url":"https://sourceforge.net/u/{u}/profile","nf":[],"pf":["Personal Tools"],"rank":79,"tags":["coding"]},{"name":"TheGuardian","url":"https://profile.theguardian.com/user/{u}","nf":["<title>public profile | Identity | The Guardian</title>"],"pf":[],"rank":80,"tags":["gb","news"]},{"name":"VK","url":"https://vk.com/{u}","nf":[],"pf":[],"rank":91,"tags":["ru","social"]},{"name":"VK (by id)","url":"https://vk.com/id{u}","nf":[],"pf":[],"rank":91,"tags":["ru","social"]},{"name":"Launchpad","url":"https://launchpad.net/~{u}","nf":[],"pf":[],"rank":93,"tags":["tech"]},{"name":"ResearchGate","url":"https://www.researchgate.net/profile/{u}","nf":[],"pf":[],"rank":100,"tags":["in","research","social","us"]},{"name":"Issuu","url":"https://issuu.com/{u}","nf":["No such user"],"pf":["displayName"],"rank":110,"tags":["business"]},{"name":"Weibo","url":"https://weibo.com/{u}","nf":["<h2>400 Bad Request</h2>"],"pf":["{\"ok\":1,\"data\":{\"user\":"],"rank":115,"tags":["cn","social"]},{"name":"Weebly","url":"http://{u}.weebly.com/","nf":["Error - Page Not Found"],"pf":["<html>"],"rank":118,"tags":["business"]},{"name":"linktr.ee","url":"https://linktr.ee/{u}","nf":[],"pf":[],"rank":120,"tags":["links"]},{"name":"Unsplash","url":"https://unsplash.com/@{u}","nf":[],"pf":[],"rank":142,"tags":["art","photo"]},{"name":"Calendly","url":"https://calendly.com/{u}","nf":["The page you are looking for could not be found"],"pf":["profile"," User"],"rank":145,"tags":["business","us"]},{"name":"Etsy","url":"https://www.etsy.com/shop/{u}","nf":[],"pf":[],"rank":146,"tags":["shopping"]},{"name":"GitLab","url":"https://gitlab.com/{u}","nf":["[]"],"pf":[],"rank":155,"tags":["coding"]},{"name":"Twitch","url":"https://twitchtracker.com/{u}","nf":[],"pf":[],"rank":163,"tags":["streaming"]},{"name":"Ebay","url":"https://www.ebay.com/usr/{u}","nf":["<svg role=\"img\" class=\"icon icon--attention-filled-small\""],"pf":["Positive feedback"],"rank":168,"tags":["shopping"]},{"name":"SlideShare","url":"https://www.slideshare.net/{u}","nf":["blankProfile","username-available","robots"],"pf":["user-name","pageInfo","listitem"],"rank":171,"tags":["documents","sharing"]},{"name":"Behance","url":"https://www.behance.net/{u}","nf":[],"pf":[],"rank":175,"tags":["business"]},{"name":"StackOverflow","url":"https://stackoverflow.com/users/filter?search={u}","nf":["\"items\":[]"],"pf":["\"items\":[{"],"rank":178,"tags":["coding"]},{"name":"Bluesky","url":"https://bsky.app/profile/{u}.bsky.social","nf":["Profile not found"],"pf":["\"did\""],"rank":184,"tags":["messaging","social"]},{"name":"Substack","url":"https://substack.com/@{u}","nf":[],"pf":[],"rank":190,"tags":["blog"]},{"name":"Blogger","url":"https://{u}.blogspot.com","nf":[],"pf":[],"rank":197,"tags":["blog"]},{"name":"Blogger (by GAIA id)","url":"https://www.blogger.com/profile/{u}","nf":["/edit-profile.g"],"pf":["><head profile="],"rank":197,"tags":["blog"]},{"name":"CNET","url":"https://www.cnet.com/profiles/{u}/","nf":["error_404","c-error404","Author not found"],"pf":["},firstName:","#email",",cmsDisplayName:"],"rank":203,"tags":["news","tech"]},{"name":"TripAdvisor","url":"https://tripadvisor.com/members/{u}","nf":["This page is on vacation…"],"pf":[],"rank":215,"tags":["travel"]},{"name":"Wix","url":"https://{u}.wix.com","nf":[],"pf":[],"rank":222,"tags":["tech"]},{"name":"DailyMotion","url":"https://www.dailymotion.com/{u}","nf":[],"pf":[],"rank":229,"tags":["video"]},{"name":"Bandcamp","url":"https://www.bandcamp.com/{u}","nf":[],"pf":[],"rank":234,"tags":["music"]},{"name":"TheVerge","url":"https://www.theverge.com/users/{u}","nf":[],"pf":[],"rank":236,"tags":["news","tech"]},{"name":"Google Scholar","url":"https://scholar.google.com/scholar?hl=en&as_sdt=0%2C5&q={u}&btnG=","nf":["did not match any articles","not match"],"pf":["class=\"gs_a\""],"rank":242,"tags":["education","research"]},{"name":"Imgur","url":"https://imgur.com/user/{u}","nf":[],"pf":[],"rank":243,"tags":["photo"]},{"name":"Yelp","url":"http://{u}.yelp.com/","nf":["viewName"," dropdown_user-name"],"pf":["Username","Birthday","First Name"],"rank":244,"tags":["review"]},{"name":"Yelp (by id)","url":"https://www.yelp.com/user_details?userid={u}","nf":["error-page"," page-status"," error-wrap"],"pf":["Birthday","Username","First Name"],"rank":244,"tags":["review"]},{"name":"Myspace","url":"https://myspace.com/{u}","nf":[],"pf":[],"rank":247,"tags":["music","social"]},{"name":"ThemeForest","url":"https://themeforest.net/user/{u}","nf":[],"pf":[],"rank":248,"tags":["coding","shopping"]},{"name":"YandexReviews","url":"https://reviews.yandex.ru/user/{u}","nf":["Пользователь скрыл свою публичную страницу"],"pf":["content=\"Отзывы и оценки"],"rank":255,"tags":["ru"]},{"name":"YandexBugbounty","url":"https://yandex.ru/bugbounty/researchers/{u}/","nf":[],"pf":[],"rank":255,"tags":["hacking","ru"]},{"name":"YandexCollections API","url":"https://yandex.ru/collections/api/users/{u}/","nf":["cl-not-found-content__title"],"pf":["public_id"],"rank":255,"tags":["ru","sharing"]},{"name":"YandexCollections API (by yandex_public_id)","url":"https://yandex.ru/collections/api/users/{u}/","nf":["cl-not-found-content__title"],"pf":["public_id"],"rank":255,"tags":["ru","sharing"]},{"name":"YandexZnatoki","url":"https://yandex.ru/q/profile/{u}","nf":[],"pf":[],"rank":255,"tags":["ru"]},{"name":"GoodReads","url":"https://www.goodreads.com/{u}","nf":[],"pf":[],"rank":259,"tags":["books"]},{"name":"Weforum","url":"https://www.weforum.org/people/{u}","nf":[],"pf":[],"rank":265,"tags":["forum"]},{"name":"Scribd","url":"https://www.scribd.com/{u}","nf":[],"pf":[],"rank":281,"tags":["reading"]},{"name":"Freepik","url":"https://www.freepik.com/author/{u}","nf":[],"pf":[],"rank":284,"tags":["art","photo","stock"]},{"name":"Academia.edu","url":"https://independent.academia.edu/{u}","nf":[],"pf":[],"rank":286,"tags":["education","research"]},{"name":"OpenStreetMap","url":"https://www.openstreetmap.org/user/{u}","nf":[],"pf":[],"rank":296,"tags":["maps"]},{"name":"LiveJournal","url":"https://{u}.livejournal.com","nf":[],"pf":[],"rank":298,"tags":["blog","ru"]},{"name":"Quora","url":"https://www.quora.com/profile/{u}","nf":[],"pf":[],"rank":305,"tags":["education"]},{"name":"Dribbble","url":"https://dribbble.com/{u}","nf":["Whoops, that page is gone."],"pf":[],"rank":306,"tags":["business"]},{"name":"Kickstarter","url":"https://www.kickstarter.com/profile/{u}","nf":[],"pf":[],"rank":307,"tags":["finance"]},{"name":"Change.org","url":"https://www.change.org/o/{u}","nf":[],"pf":["first_name","last_name","Email"],"rank":316,"tags":["social"]},{"name":"Fandom","url":"https://www.fandom.com/u/{u}","nf":[],"pf":[],"rank":323,"tags":["wiki"]},{"name":"Xing","url":"https://www.xing.com/profile/{u}","nf":[],"pf":[],"rank":332,"tags":["de","eu"]},{"name":"Patreon","url":"https://www.patreon.com/{u}","nf":[],"pf":[],"rank":341,"tags":["finance"]},{"name":"DeviantART","url":"https://{u}.deviantart.com","nf":[],"pf":[],"rank":350,"tags":["art","photo"]},{"name":"Gofundme","url":"https://www.gofundme.com/f/{u}","nf":[],"pf":[],"rank":394,"tags":["finance"]},{"name":"Zhihu","url":"https://www.zhihu.com/people/{u}","nf":["用户不存在"],"pf":[],"rank":398,"tags":["cn"]},{"name":"Threads","url":"https://www.threads.net/@{u}","nf":["<title>Threads • Log in</title>"],"pf":[],"rank":409,"tags":["social"]},{"name":"Giphy","url":"https://giphy.com/channel/{u}","nf":["404 Not Found"],"pf":["Giphy","al:ios:app_name"],"rank":412,"tags":["video"]},{"name":"Slack","url":"https://{u}.slack.com","nf":[],"pf":[],"rank":422,"tags":["messaging"]},{"name":"BuzzFeed","url":"https://buzzfeed.com/{u}","nf":[],"pf":[],"rank":465,"tags":["news"]},{"name":"W3Schools","url":"https://pathfinder-api.kai.w3spaces.com/public-profile-api/{u}","nf":[],"pf":[],"rank":466,"tags":["education"]},{"name":"Naver","url":"https://blog.naver.com/{u}","nf":[],"pf":[],"rank":475,"tags":["kr"]},{"name":"Disqus","url":"https://disqus.com/{u}","nf":["User matching query does not exist"],"pf":["https://disqus.com/api/users/"],"rank":485,"tags":["discussion","social"]},{"name":"Snapchat","url":"https://www.snapchat.com/add/{u}","nf":[],"pf":[],"rank":525,"tags":["social"]},{"name":"Trello","url":"https://trello.com/{u}","nf":["model not found"],"pf":[],"rank":535,"tags":["tasks"]},{"name":"OK","url":"https://ok.ru/{u}","nf":[],"pf":[],"rank":537,"tags":["ru","social"]},{"name":"Photobucket","url":"https://app.photobucket.com/u/{u}","nf":["Found. Redirecting"],"pf":[],"rank":549,"tags":["photo"]},{"name":"Udemy","url":"https://www.udemy.com/user/{u}/","nf":[],"pf":[],"rank":553,"tags":["education"]},{"name":"Shutterstock","url":"https://www.shutterstock.com/g/{u}/about","nf":["This surprising...","Unfortunately, we can't find what you're looking for.","<title>Not Found | Shutterstock</title>"],"pf":["{username}","Information"],"rank":564,"tags":["music","photo","stock"]},{"name":"MixCloud","url":"https://www.mixcloud.com/{u}/","nf":[],"pf":[],"rank":584,"tags":["music"]},{"name":"NPM","url":"https://www.npmjs.com/~{u}","nf":["\"total\":0"],"pf":["\"objects\":[{"],"rank":590,"tags":["coding"]},{"name":"NPM-Package","url":"https://www.npmjs.com/package/{u}","nf":[],"pf":[],"rank":590,"tags":["coding"]},{"name":"Slashdot","url":"https://slashdot.org/~{u}","nf":["user you requested does not exist"],"pf":[],"rank":616,"tags":["news"]},{"name":"Steam","url":"https://steamcommunity.com/id/{u}","nf":["The specified profile could not be found"],"pf":[],"rank":650,"tags":["gaming"]},{"name":"Steam (by id)","url":"https://steamcommunity.com/profiles/{u}","nf":["The specified profile could not be found"],"pf":[],"rank":650,"tags":["gaming"]},{"name":"Steam (Group)","url":"https://steamcommunity.com/groups/{u}","nf":["No group could be retrieved for the given URL"],"pf":[],"rank":650,"tags":["gaming"]},{"name":"DigitalOcean","url":"https://www.digitalocean.com/community/users/{u}","nf":[],"pf":[],"rank":659,"tags":["forum","tech"]},{"name":"About.me","url":"https://about.me/{u}","nf":[],"pf":[],"rank":685,"tags":["blog"]},{"name":"Instructables","url":"https://www.instructables.com/member/{u}","nf":["404: We're sorry, things break sometimes"],"pf":[],"rank":700,"tags":["hobby"]},{"name":"Ameblo","url":"https://ameblo.jp/{u}","nf":["THROW_NOT_FOUND_EXCEPTION"],"pf":["profile"],"rank":701,"tags":["blog","jp"]},{"name":"HuggingFace","url":"https://huggingface.co/{u}","nf":[],"pf":[],"rank":706,"tags":["coding","llm","tech"]},{"name":"Laracast","url":"https://laracasts.com/@{u}","nf":[],"pf":[],"rank":738,"tags":["coding","education"]},{"name":"Fiverr","url":"https://www.fiverr.com/{u}","nf":[],"pf":[],"rank":760,"tags":["shopping"]},{"name":"Paypal","url":"https://www.paypal.com/paypalme/{u}","nf":["<title>PayPal.Me</title><meta name=\"twitt","<div class=\"row error404\""],"pf":["displayName","displayEmail"],"rank":775,"tags":["finance","fintech"]},{"name":"Itch.io","url":"https://{u}.itch.io/","nf":[],"pf":[],"rank":785,"tags":["gaming"]},{"name":"BitBucket","url":"https://bitbucket.org/{u}/","nf":[],"pf":[],"rank":801,"tags":["coding"]},{"name":"last.fm","url":"https://last.fm/user/{u}","nf":[],"pf":[],"rank":863,"tags":["music"]},{"name":"Gumroad","url":"https://www.gumroad.com/{u}","nf":["Page not found"],"pf":["title=\"Gumroad\""],"rank":871,"tags":["shopping"]},{"name":"Upwork","url":"https://upwork.com/fl/{u}","nf":[],"pf":[],"rank":882,"tags":["freelance"]},{"name":"Yumpu","url":"https://www.yumpu.com/user/{u}","nf":["float-left"],"pf":["yp-grid-mag-container yp-content-container"],"rank":895,"tags":["stock"]},{"name":"PyPi","url":"https://pypi.org/user/{u}","nf":[],"pf":[],"rank":897,"tags":["coding"]},{"name":"Douban","url":"https://www.douban.com/people/{u}/","nf":["返回首页"],"pf":["db-usr-profile"],"rank":908,"tags":["cn"]},{"name":"LonelyPlanet","url":"https://www.lonelyplanet.com/profile/{u}","nf":[],"pf":[],"rank":911,"tags":["travel"]},{"name":"Figma","url":"https://www.figma.com/@{u}","nf":["<title>Figma</title>"],"pf":[],"rank":917,"tags":["design"]},{"name":"iStock","url":"https://www.istockphoto.com/ru/portfolio/{u}","nf":["subheading"],"pf":["collectionName"],"rank":930,"tags":["photo","stock"]},{"name":"Pastebin","url":"https://pastebin.com/u/{u}","nf":[],"pf":[],"rank":932,"tags":["sharing"]},{"name":"500px","url":"https://500px.com/p/{u}","nf":["\"userByUsername\":null"],"pf":["\"legacyId\":\""],"rank":938,"tags":["photo"]},{"name":"Gamespot","url":"https://www.gamespot.com/profile/{u}/","nf":[],"pf":[],"rank":943,"tags":["gaming"]},{"name":"Houzz","url":"https://houzz.com/user/{u}","nf":["The page you requested was not found."],"pf":[],"rank":963,"tags":["design"]},{"name":"TradingView","url":"https://www.tradingview.com/u/{u}","nf":[],"pf":[],"rank":999,"tags":["trading"]},{"name":"Foursquare","url":"https://foursquare.com/{u}","nf":["<title>Foursquare "],"pf":["<meta content=\"name=Profile"],"rank":1000,"tags":["geosocial","in","social"]},{"name":"Discogs","url":"https://www.discogs.com/user/{u}","nf":[],"pf":[],"rank":1020,"tags":["music"]},{"name":"Jimdo","url":"https://{u}.jimdosite.com","nf":[],"pf":[],"rank":1037,"tags":["de"]},{"name":"Codepen","url":"https://codepen.io/{u}","nf":["I'm afraid you've found a page that doesn't exist on CodePen"],"pf":[],"rank":1087,"tags":["coding"]},{"name":"kofi","url":"https://ko-fi.com/{u}","nf":["Make income from your art!","https://storage.ko-fi.com/cdn/og.png"],"pf":[],"rank":1096,"tags":["freelance"]},{"name":"Rottentomatoes","url":"https://www.rottentomatoes.com/critic/{u}/movies","nf":[],"pf":[],"rank":1101,"tags":["movies"]},{"name":"Smugmug","url":"https://{u}.smugmug.com/","nf":[],"pf":[],"rank":1114,"tags":["photo"]},{"name":"YandexZenChannel","url":"https://dzen.ru/channel/{u}","nf":[".zen-ui-page-404"],"pf":["zen_object_id"],"rank":1118,"tags":["ru"]},{"name":"DEV Community","url":"https://dev.to/{u}","nf":[],"pf":[],"rank":1119,"tags":["coding"]},{"name":"Duolingo","url":"https://www.duolingo.com/profile/{u}","nf":["{\"users\":[]}"],"pf":[],"rank":1126,"tags":["education"]},{"name":"Ustream","url":"http://www.ustream.tv/channel/adam{u}","nf":[],"pf":[],"rank":1143,"tags":["streaming","video"]},{"name":"Strava","url":"https://www.strava.com/athletes/{u}","nf":["<title>Strava | "],"pf":["Strava</title>"],"rank":1145,"tags":["sport"]},{"name":"Wikidot","url":"http://www.wikidot.com/user:info/{u}","nf":["User does not exist."],"pf":["Wikidot user since"],"rank":1183,"tags":["wiki"]},{"name":"ReverbNation","url":"https://www.reverbnation.com/{u}","nf":["Sorry, we couldn't find that page"],"pf":[],"rank":1205,"tags":["music"]},{"name":"VirusTotal","url":"https://www.virustotal.com/ui/users/{u}","nf":["not found"],"pf":[],"rank":1229,"tags":["tech"]},{"name":"Gitee","url":"https://gitee.com/{u}","nf":[],"pf":[],"rank":1236,"tags":["cn"]},{"name":"ImageShack","url":"https://imageshack.com/user/{u}","nf":[],"pf":[],"rank":1263,"tags":["photo","sharing"]},{"name":"ProductHunt","url":"https://www.producthunt.com/@{u}","nf":["We seem to have lost this page"],"pf":[":{\"data\":{\"profile\":{\"__typename\""],"rank":1268,"tags":["tech"]},{"name":"note","url":"https://note.com/{u}","nf":[],"pf":[],"rank":1295,"tags":["jp"]},{"name":"LiveInternet","url":"https://www.liveinternet.ru/users/{u}/profile","nf":[],"pf":["/foaf/"],"rank":1323,"tags":["ru"]},{"name":"BuyMeACoffee","url":"https://buymeacoff.ee/{u}","nf":[],"pf":[],"rank":1329,"tags":["freelance"]},{"name":"Gitea","url":"https://gitea.com/{u}","nf":[],"pf":[],"rank":1342,"tags":["coding"]},{"name":"Genius","url":"https://genius.com/{u}","nf":[],"pf":[],"rank":1343,"tags":["music"]}];
-
-// === Platform probes ===
-const PLATFORMS=[
-  {name:'GitHub',url:'https://github.com/{u}',type:'github_api'},
-  {name:'GitLab',url:'https://gitlab.com/{u}',type:'http',notFound:['404 page not found','page not found']},
-  {name:'X/Twitter',url:'https://x.com/{u}',type:'http',notFound:['this account doesn\'t exist','account suspended','user suspended','user not found']},
-  {name:'Reddit',url:'https://www.reddit.com/user/{u}',type:'reddit_api',notFound:['nobody on reddit goes by that name','user not found','account suspended','page not found']},
-  {name:'Instagram',url:'https://www.instagram.com/{u}/',type:'instagram',notFound:['sorry, this page isn\'t available','page not available','user not found']},
-  {name:'YouTube',url:'https://www.youtube.com/@{u}',type:'http',notFound:['this page isn\'t available','channel not found','404 not found']},
-  {name:'TikTok',url:'https://www.tiktok.com/@{u}',type:'http',notFound:['couldn\'t find this account','account not found','page not available']},
-  {name:'Telegram',url:'https://t.me/{u}',type:'http',notFound:['<div class="tgme_page_status">','if you have telegram, you can contact']},
-  {name:'Mastodon',url:'https://mastodon.social/@{u}',type:'http',notFound:['the page you are looking for isn\'t here','404','not found']},
-  {name:'Twitch',url:'https://www.twitch.tv/{u}',type:'http',notFound:['sorry, this page doesn\'t exist','channel not found','user not found']},
-  {name:'Medium',url:'https://medium.com/@{u}',type:'http',notFound:['page not found','user not found','404']},
-  {name:'Dev.to',url:'https://dev.to/{u}',type:'http',notFound:['404 not found','page not found','user not found']},
-  {name:'HackerNews',url:'https://news.ycombinator.com/user?id={u}',type:'http',notFound:['no such user','user not found','404']},
-  {name:'Pinterest',url:'https://www.pinterest.com/{u}/',type:'http',notFound:['sorry, this page isn\'t available','page not available','user not found']},
-  {name:'Keybase',url:'https://keybase.io/{u}',type:'http',notFound:['not found','user not found','404']},
-  {name:'Steam',url:'https://steamcommunity.com/id/{u}',type:'http',notFound:['the specified profile could not be found','profile not found','group not found']},
-  {name:'Patreon',url:'https://www.patreon.com/{u}',type:'http',notFound:['page not found','user not found','404']},
-  {name:'Ko-fi',url:'https://ko-fi.com/{u}',type:'http',notFound:['page not found','user not found','404']},
-  {name:'Linktree',url:'https://linktr.ee/{u}',type:'http',notFound:['page not found','user not found','404','page not available']},
-  {name:'Gravatar',url:'https://gravatar.com/{u}',type:'http',notFound:['user not found','profile not found','404']},
-];
-
-async function probeGithub(username){
-  // GitHub API is CORS-friendly and returns clean JSON
-  try{
-    const r=await fetch('https://api.github.com/users/'+encodeURIComponent(username),{headers:{'Accept':'application/vnd.github+json'}});
-    if(r.status===200){
-      const d=await r.json();
-      return {status:'found',platform:'GitHub',username:username,url:d.html_url,
-        snippet:'Name: '+(d.name||'N/A')+' | Bio: '+(d.bio||'N/A')+' | Followers: '+d.followers+' | Repo: '+d.public_repos+' | Location: '+(d.location||'N/A')+' | Created: '+d.created_at,
-        extra:d};
-    }
-    return {status:'notfound',platform:'GitHub',username:username};
-  }catch(e){return {status:'notfound',platform:'GitHub',username:username,error:e.message}}
+function sendSuggestion(text) {
+  input.value = text;
+  sendMessage();
 }
 
-// Multi-proxy fetch with fallback: allorigins → corsproxy → codetabs
-async function fetchViaProxy(url,timeoutMs){
-  timeoutMs=timeoutMs||20000;
-  const proxies=[
-    'https://api.allorigins.win/get?url=',
-    'https://corsproxy.io/?url=',
-    'https://api.codetabs.com/v1/proxy/?quest='
-  ];
-  let lastErr=null;
-  for(const proxy of proxies){
-    const ctrl=new AbortController();
-    const t=setTimeout(()=>ctrl.abort(),timeoutMs);
-    try{
-      const proxyUrl=proxy+encodeURIComponent(url);
-      const r=await fetch(proxyUrl,{signal:ctrl.signal});
-      clearTimeout(t);
-      if(!r.ok){lastErr='proxy HTTP '+r.status;continue}
-      // allorigins wraps in JSON, others return raw
-      if(proxy.includes('allorigins')){
-        const j=await r.json();
-        const contents=j.contents||'';
-        if(contents&&contents.length>0)return contents;
-      }else{
-        const text=await r.text();
-        if(text&&text.length>0)return text;
-      }
-    }catch(e){clearTimeout(t);lastErr=e.message;continue}
-  }
-  throw new Error(lastErr||'all proxies failed');
-}
-
-async function probeHttp(platform,username){
-  const url=platform.url.replace('{u}',encodeURIComponent(username));
-  try{
-    const contents=await fetchViaProxy(url);
-    if(!contents||contents.length<100){
-      return {status:'notfound',platform:platform.name,username,url};
+async function sendMessage() {
+  const message = input.value.trim();
+  if (!message) return;
+  
+  addMessage(message, 'user');
+  input.value = '';
+  sendBtn.disabled = true;
+  statusText.textContent = '思考中...';
+  
+  // 添加打字指示器
+  const typingDiv = addMessage('<span class="typing"></span> AI 正在分析...', 'ai');
+  
+  try {
+    const response = await fetch(`${API_BASE}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: message,
+        history: history.slice(-5)
+      })
+    });
+    
+    const data = await response.json();
+    
+    // 移除打字指示器
+    typingDiv.remove();
+    
+    if (data.reply) {
+      addMessage(data.reply, 'ai');
+      history.push({ role: 'user', content: message });
+      history.push({ role: 'assistant', content: data.reply });
     }
-
-    const lower=contents.toLowerCase();
-
-    // 1. Check platform-specific not-found patterns (our custom + Maigret nf)
-    const platformPatterns=platform.notFound||[];
-    const maigretNf=platform.nf||[];
-    const allNf=[...platformPatterns,...maigretNf];
-    for(const p of allNf){
-      if(p&&lower.includes(p.toLowerCase())){
-        return {status:'notfound',platform:platform.name,username,url};
-      }
-    }
-
-    // 2. Check Maigret presence strings (pf) - if present, high confidence hit
-    const maigretPf=platform.pf||[];
-    let hasPresenceIndicator=false;
-    for(const p of maigretPf){
-      if(p&&contents.includes(p)){hasPresenceIndicator=true;break}
-    }
-
-    // 3. Check generic not-found patterns
-    const genericNotFound=[
-      'user not found','account not found','doesn\'t exist','does not exist',
-      'this profile cannot be viewed','profile does not exist',
-      'the page you were looking for doesn\'t',
-      'sorry, this page isn\'t available','page isn\'t available',
-      'no profiles found','user unavailable',
-      'account suspended','user suspended'
-    ];
-    for(const p of genericNotFound){
-      if(lower.includes(p)){return {status:'notfound',platform:platform.name,username,url}}
-    }
-
-    // 4. Extract snippet: try title/meta description/og:description
-    let snippet='';
-    const titleM=contents.match(/<title[^>]*>([^<]+)<\/title>/i);
-    if(titleM)snippet+='Title: '+titleM[1].trim()+' | ';
-    const descM=contents.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i);
-    if(descM)snippet+='Desc: '+descM[1].trim()+' | ';
-    const ogDescM=contents.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i);
-    if(ogDescM)snippet+='OG: '+ogDescM[1].trim();
-    if(!snippet)snippet=contents.replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim().slice(0,200);
-
-    // 5. Secondary validation: if snippet is too short, mark as not found
-    if(snippet.length<20){
-      return {status:'notfound',platform:platform.name,username,url};
-    }
-
-    return {status:'found',platform:platform.name,username,url,snippet:snippet.slice(0,300),verified:hasPresenceIndicator};
-  }catch(e){return {status:'notfound',platform:platform.name,username,url,error:e.message}}
-}
-
-// Reddit API probe: fetch about.json (returns user metadata as JSON)
-async function probeReddit(username){
-  const url='https://www.reddit.com/user/'+encodeURIComponent(username)+'/about.json';
-  try{
-    const raw=await fetchViaProxy(url,15000);
-    if(!raw||raw.length<50){
-      return {status:'notfound',platform:'Reddit',username,url};
-    }
-    let d;
-    try{d=JSON.parse(raw)}catch(e){
-      // allorigins wraps in {contents: "..."} - already unwrapped by fetchViaProxy
-      // if still not JSON, fall back to HTML probe
-      return await probeHttp({name:'Reddit',url:'https://www.reddit.com/user/{u}',notFound:['nobody on reddit goes by that name','user not found','account suspended','page not found']},username);
-    }
-    const data=d&&d.data;
-    if(!data||data.name===undefined){
-      return {status:'notfound',platform:'Reddit',username,url};
-    }
-    // Reddit returns 404 in JSON when user doesn't exist
-    if(d.error===404||data.name===null){
-      return {status:'notfound',platform:'Reddit',username,url};
-    }
-    const snippet='Name: '+(data.name||'N/A')+
-      ' | Karma: '+(data.total_karma||0)+
-      ' | Created: '+(new Date((data.created_utc||0)*1000).toISOString().slice(0,10))+
-      ' | Verified: '+(data.verified?'yes':'no')+
-      ' | Subreddit: '+(data.subreddit?(data.subreddit.display_name||''):'');
-    return {status:'found',platform:'Reddit',username,url,snippet:snippet,verified:true,extra:data};
-  }catch(e){
-    // Fallback to HTML probe
-    return await probeHttp({name:'Reddit',url:'https://www.reddit.com/user/{u}',notFound:['nobody on reddit goes by that name','user not found','account suspended','page not found']},username);
-  }
-}
-
-// Instagram probe: try GraphQL endpoint first, then HTML
-async function probeInstagram(username){
-  // Method 1: Try the web profile HTML via proxy (public profiles return og: tags)
-  const url='https://www.instagram.com/'+encodeURIComponent(username)+'/';
-  try{
-    const contents=await fetchViaProxy(url,20000);
-    if(!contents||contents.length<100){
-      return {status:'notfound',platform:'Instagram',username,url};
-    }
-    const lower=contents.toLowerCase();
-
-    // Instagram not-found indicators
-    const nfPatterns=[
-      'sorry, this page isn\'t available','page isn\'t available',
-      'page not available','user not found',
-      'dialog-404','sorry, this page isn&#39;t available'
-    ];
-    for(const p of nfPatterns){
-      if(lower.includes(p)){return {status:'notfound',platform:'Instagram',username,url}}
-    }
-
-    // Extract og: meta tags (Instagram populates these for public profiles)
-    let snippet='';
-    const ogTitleM=contents.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i);
-    if(ogTitleM)snippet+='Title: '+ogTitleM[1].trim()+' | ';
-    const ogDescM=contents.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i);
-    if(ogDescM)snippet+='Desc: '+ogDescM[1].trim()+' | ';
-    const ogImageM=contents.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
-    if(ogImageM)snippet+='Image: '+ogImageM[1].trim();
-
-    // Instagram embeds JSON in script tags - try to extract
-    const sharedDataM=contents.match(/window\._sharedData\s*=\s*(\{[^<]+\})\s*;/);
-    if(sharedDataM){
-      try{
-        const sd=JSON.parse(sharedDataM[1]);
-        const user=sd&&sd.entry_data&&sd.entry_data.ProfilePage&&sd.entry_data.ProfilePage[0]&&sd.entry_data.ProfilePage[0].graphql&&sd.entry_data.ProfilePage[0].graphql.user;
-        if(user){
-          snippet='Username: '+user.username+
-            ' | Name: '+(user.full_name||'N/A')+
-            ' | Followers: '+(user.edge_followed_by?user.edge_followed_by.count:'?')+
-            ' | Following: '+(user.edge_follow?user.edge_follow.count:'?')+
-            ' | Bio: '+(user.biography||'N/A')+
-            ' | Verified: '+(user.is_verified?'yes':'no');
-          return {status:'found',platform:'Instagram',username,url,snippet:snippet.slice(0,300),verified:true,extra:user};
+    
+    // 显示情报结果
+    if (data.osint_results) {
+      const osint = data.osint_results;
+      if (osint.error) {
+        addMessage(`情报收集出错: ${osint.error}`, 'system');
+      } else {
+        // 显示 Grok 搜索发现的平台
+        const grokPlatforms = osint.grok_search?.platforms || [];
+        const maigretFound = osint.maigret_found || [];
+        const allFindings = [
+          ...grokPlatforms.map(p => ({ ...p, platform: p.platform || 'Grok搜索' })),
+          ...maigretFound.map(f => ({ platform: f.platform, url: f.url, snippet: f.snippet }))
+        ];
+        if (allFindings.length > 0) {
+          addFindings(allFindings);
         }
-      }catch(e){}
-    }
-
-    // If we have og: tags, consider it found
-    if(snippet.length>20){
-      return {status:'found',platform:'Instagram',username,url,snippet:snippet.slice(0,300),verified:false};
-    }
-
-    // If content is mostly login wall, mark as not found
-    if(lower.includes('log in')&&lower.includes('sign up')&&!ogTitleM){
-      return {status:'notfound',platform:'Instagram',username,url,error:'login wall'};
-    }
-
-    return {status:'notfound',platform:'Instagram',username,url};
-  }catch(e){return {status:'notfound',platform:'Instagram',username,url,error:e.message}}
-}
-
-async function probePlatform(platform,username){
-  if(platform.type==='github_api')return await probeGithub(username);
-  if(platform.type==='reddit_api')return await probeReddit(username);
-  if(platform.type==='instagram')return await probeInstagram(username);
-  return await probeHttp(platform,username);
-}
-
-// === Search engine probe (DuckDuckGo + Yandex + Bing) ===
-async function searchEngineProbe(target,maxResults){
-  maxResults=maxResults||5;
-  const searchEngines=[
-    {name:'DuckDuckGo',url:'https://html.duckduckgo.com/html/?q=',parseFunc:parseDuckDuckGo},
-    {name:'Bing',url:'https://www.bing.com/search?q=',parseFunc:parseBing},
-    {name:'Yandex',url:'https://yandex.com/search/?text=',parseFunc:parseYandex}
-  ];
-
-  for(const engine of searchEngines){
-    try{
-      const searchUrl=engine.url+encodeURIComponent(target);
-      pushMsg('action','🔍 搜索引擎','尝试 '+engine.name+' 搜索: '+target);
-      const html=await fetchViaProxy(searchUrl);
-      if(!html||html.length<200)continue;
-
-      const results=engine.parseFunc(html,target);
-      if(results.length===0){
-        pushMsg('system','系统',engine.name+' 未解析到结果');
-        continue;
-      }
-
-      pushMsg('action','🔍 '+engine.name+' 结果','找到 '+results.length+' 个链接，开始爬取前 '+Math.min(maxResults,results.length)+' 个');
-
-      // Crawl top N result pages
-      const crawlResults=[];
-      const toCrawl=results.slice(0,maxResults);
-      for(let i=0;i<toCrawl.length;i++){
-        const r=toCrawl[i];
-        try{
-          addFinding({status:'pending',platform:engine.name+'搜索',username:target,url:r.url,snippet:'标题: '+r.title});
-          const content=await fetchViaProxy(r.url);
-          if(content&&content.length>100){
-            // Extract title and text snippet
-            const titleM=content.match(/<title[^>]*>([^<]+)<\/title>/i);
-            const title=titleM?titleM[1].trim():r.title;
-            // Extract text content (strip HTML)
-            const text=content.replace(/<script[^>]*>[\s\S]*?<\/script>/gi,'')
-              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi,'')
-              .replace(/<[^>]+>/g,' ')
-              .replace(/\s+/g,' ')
-              .trim();
-            const snippet=text.slice(0,400);
-            crawlResults.push({
-              status:'found',
-              platform:engine.name+'搜索',
-              username:target,
-              url:r.url,
-              title:title,
-              snippet:'标题: '+title+' | 内容: '+snippet,
-              engine:engine.name
-            });
-            // Update the finding
-            const fIdx=findings.findIndex(f=>f.url===r.url&&f.status==='pending');
-            if(fIdx>=0){
-              updateFinding(fIdx,crawlResults[crawlResults.length-1]);
-              pushMsg('ai','✓ 搜索命中','<strong>'+engine.name+'</strong> / '+title.slice(0,60)+'\n'+r.url);
-            }
-            totalProbed++;
-            setStreamStat('搜索爬取中 ('+totalProbed+'/'+totalTasks+')',true);
-          }else{
-            // Mark as not found
-            const fIdx=findings.findIndex(f=>f.url===r.url&&f.status==='pending');
-            if(fIdx>=0){
-              updateFinding(fIdx,{status:'notfound',platform:engine.name+'搜索',username:target,url:r.url});
-            }
+        // 显示个人信息
+        const personalInfo = osint.grok_search?.personal_info || {};
+        if (Object.keys(personalInfo).length > 0) {
+          let infoText = '提取的个人信息:\n';
+          for (const [key, value] of Object.entries(personalInfo)) {
+            infoText += `- ${key}: ${value}\n`;
           }
-        }catch(e){
-          const fIdx=findings.findIndex(f=>f.url===r.url&&f.status==='pending');
-          if(fIdx>=0){
-            updateFinding(fIdx,{status:'notfound',platform:engine.name+'搜索',username:target,url:r.url,error:e.message});
-          }
+          addMessage(infoText, 'ai');
         }
       }
-
-      if(crawlResults.length>0){
-        return crawlResults;
-      }
-    }catch(e){
-      pushMsg('system','系统',engine.name+' 搜索失败: '+e.message);
-      continue;
     }
-  }
-  return [];
-}
-
-// Parse DuckDuckGo HTML results
-function parseDuckDuckGo(html,target){
-  const results=[];
-  const lower=html.toLowerCase();
-  // DuckDuckGo HTML uses class="result__url" and class="result__a"
-  const linkRegex=/<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-  let m;
-  while((m=linkRegex.exec(html))!==null){
-    let url=m[1];
-    const title=m[2].replace(/<[^>]+>/g,'').trim();
-    // DuckDuckGo uses redirect URLs like //duckduckgo.com/l/?uddg=ENCODED_URL
-    if(url.includes('uddg=')){
-      const uddgM=url.match(/uddg=([^&]+)/);
-      if(uddgM)url=decodeURIComponent(uddgM[1]);
-    }
-    if(url.startsWith('//'))url='https:'+url;
-    if(url&&url.startsWith('http')&&title){
-      results.push({url,title});
-    }
-  }
-  return results;
-}
-
-// Parse Bing HTML results
-function parseBing(html,target){
-  const results=[];
-  // Bing uses class="b_algo" with <h2><a href="...">
-  const linkRegex=/<h2><a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-  let m;
-  while((m=linkRegex.exec(html))!==null){
-    const url=m[1];
-    const title=m[2].replace(/<[^>]+>/g,'').trim();
-    if(url&&url.startsWith('http')&&title){
-      results.push({url,title});
-    }
-  }
-  return results;
-}
-
-// Parse Yandex HTML results
-function parseYandex(html,target){
-  const results=[];
-  // Yandex uses class="link" with href
-  const linkRegex=/<a[^>]+class="[^"]*link[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-  let m;
-  while((m=linkRegex.exec(html))!==null){
-    let url=m[1];
-    const title=m[2].replace(/<[^>]+>/g,'').trim();
-    if(url.startsWith('//'))url='https:'+url;
-    if(url&&url.startsWith('http')&&title&&title.length>5){
-      results.push({url,title});
-    }
-  }
-  // Fallback: any external links
-  if(results.length===0){
-    const fallbackRegex=/<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-    while((m=fallbackRegex.exec(html))!==null){
-      const url=m[1];
-      const title=m[2].replace(/<[^>]+>/g,'').trim();
-      if(url&&title&&title.length>5&&!url.includes('yandex.')&&!url.includes('ya.')){
-        results.push({url,title});
-      }
-    }
-  }
-  return results;
-}
-
-// === Variant generation (frontend basic) ===
-function generateVariants(username){
-  const variants=new Set([username]);
-  const u=username.replace(/^@/,'').trim();
-  if(u.length<1)return [username];
-
-  // Handle space-separated names (e.g. "Elon Musk")
-  if(u.includes(' ')){
-    const parts=u.split(/\s+/);
-    if(parts.length>=2){
-      const first=parts[0],last=parts[parts.length-1];
-      variants.add(first);
-      variants.add(last);
-      variants.add((first+last).toLowerCase());
-      variants.add((first+'.'+last).toLowerCase());
-      variants.add((first+'_'+last).toLowerCase());
-      variants.add((first+'-'+last).toLowerCase());
-      variants.add((first[0]+last).toLowerCase()); // emusk
-      variants.add((first[0]+'_'+last).toLowerCase());
-      variants.add((first[0]+'.'+last).toLowerCase());
-      variants.add((first+' '+last).toLowerCase());
-    }
-  }
-
-  // underscore / camelCase splitting
-  if(!u.includes('_')&&!u.includes(' ')){
-    const parts=u.match(/[A-Z][a-z]+|[a-z]+/g);
-    if(parts&&parts.length>1){
-      variants.add(parts.join('_').toLowerCase());
-      variants.add(parts.join('-').toLowerCase());
-      variants.add(parts.join('.').toLowerCase());
-    }
-  }else if(u.includes('_')){
-    variants.add(u.replace(/_/g,''));
-    variants.add(u.replace(/_/g,'-'));
-    variants.add(u.replace(/_/g,'.'));
-  }
-
-  // case variants
-  variants.add(u.toLowerCase());
-  variants.add(u.toUpperCase());
-  variants.add(u.charAt(0).toUpperCase()+u.slice(1).toLowerCase());
-
-  // leetspeak (common substitutions)
-  const leetMap={'o':'0','O':'0','l':'1','L':'1','e':'3','E':'3','a':'4','A':'4','s':'5','S':'5','t':'7','T':'7'};
-  const leet=u.replace(/[oOlLeEaAsStT]/g,c=>leetMap[c]||c);
-  if(leet!==u)variants.add(leet);
-
-  return [...variants].filter(v=>v&&v.length>1).slice(0,10);
-}
-
-// === AI strategy ===
-// Get top N sites from Maigret by rank (lower rank = more popular)
-function getTopMaigretSites(limit){
-  return [...MAIGRET_SITES].sort((a,b)=>a.rank-b.rank).slice(0,limit);
-}
-
-// Get sites by tags (e.g. 'coding', 'social', 'music')
-function getMaigretSitesByTags(tags,limit){
-  const filtered=MAIGRET_SITES.filter(s=>s.tags&&s.tags.some(t=>tags.includes(t)));
-  return filtered.sort((a,b)=>a.rank-b.rank).slice(0,limit);
-}
-
-async function aiPlanStrategy(target){
-  // Build a compact list of available site categories for AI to choose from
-  const allTags=new Set();
-  MAIGRET_SITES.forEach(s=>(s.tags||[]).forEach(t=>allTags.add(t)));
-  const tagList=[...allTags].sort().join(', ');
-
-  const prompt='你是一名 OSINT 情报分析师。用户要调查目标："'+target+'"。\n\n'+
-    '请分析并返回 JSON 格式（不要 markdown 代码块，直接返回 JSON）：\n'+
-    '{\n'+
-    '  "type": "person|username|org|unknown",\n'+
-    '  "primary_query": "最核心的搜索词（去掉@、去掉URL路径）",\n'+
-    '  "variants": ["变体1","变体2","变体3","变体4","变体5"],\n'+
-    '  "keywords": ["附加关键词1","关键词2","关键词3"],\n'+
-    '  "platforms_to_focus": ["GitHub","Reddit","X/Twitter"],\n'+
-    '  "site_tags": ["social","coding","music"],\n'+
-    '  "strategy_notes": "一句话策略说明"\n'+
-    '}\n\n'+
-    '变体生成规则（多轮变体搜索法）：\n'+
-    '1. 核心词变体：去掉/加下划线、连字符、点号；大小写变化；camelCase 拆分\n'+
-    '2. 昵称变体：如果是真实姓名，生成昵称、缩写、首字母组合（如 "Elon Musk" → "elonmusk","emusk","e_musk"）\n'+
-    '3. 常见替代拼写：leetspeak（0→o,1→l,3→e）、常见缩写、平台习惯命名\n'+
-    '4. 平台习惯：GitHub 倾向小写无空格，Twitter 倾向下划线或连字符\n'+
-    '5. 去重：只保留有意义的变体，最多 5 个\n\n'+
-    'keywords 规则：与目标相关的职业、兴趣、组织、地点等关键词\n'+
-    'platforms_to_focus 规则：根据目标类型推荐 3-5 个最可能命中的平台（用平台名）\n'+
-    'site_tags 规则：从以下标签中选 3-8 个最相关的：'+tagList+'\n'+
-    '  这些标签用于从 150 个 Maigret 站点中筛选最可能命中的站点\n'+
-    '只返回 JSON，不要其他文字。';
-  const res=await aiCall(prompt,cfg.planModel);
-  // Extract JSON
-  const m=res.match(/\{[\s\S]*\}/);
-  if(!m)throw new Error('AI 未返回有效 JSON: '+res.slice(0,200));
-  return JSON.parse(m[0]);
-}
-
-async function aiAnalyzeFindings(target,strategy,foundFindings){
-  const findingsCtx=foundFindings.map((f,i)=>'['+(i+1)+'] '+f.platform+' | '+f.username+' | '+f.url+'\n    '+(f.snippet||'无摘要')).join('\n');
-  const prompt='你是一名 OSINT 情报分析师。目标是 "'+target+'"。\n\n'+
-    '搜索策略：'+JSON.stringify(strategy)+'\n\n'+
-    '已发现的线索（'+foundFindings.length+' 条命中）：\n'+findingsCtx+'\n\n'+
-    '请分析线索并返回 JSON（不要 markdown 代码块，直接返回 JSON）：\n'+
-    '{\n'+
-    '  "analysis": "分析正文，不超过 300 字。回答：1.这些账号是否属于同一人？可信度？2.能推断的个人信息（位置/职业/兴趣/关联人）3.需核实的地方",\n'+
-    '  "new_ids": ["从线索摘要中发现的新的用户名/ID（去@、去URL路径），用于递归搜索其他平台。只放高置信度的，最多5个"]\n'+
-    '}\n\n'+
-    'new_ids 提取规则：\n'+
-    '- 从 bio/description/snippet 中提取看起来像用户名的字符串\n'+
-    '- 形如 @username、t.me/username、github.com/username 的引用\n'+
-    '- 不要放原始目标本身，不要放已探测过的变体\n'+
-    '- 不确定时留空数组 []\n'+
-    '只返回 JSON，不要其他文字。';
-  const res=await aiCall(prompt,cfg.planModel);
-  const m=res.match(/\{[\s\S]*\}/);
-  if(!m){
-    return {analysis:res.slice(0,300),new_ids:[]};
-  }
-  try{
-    const parsed=JSON.parse(m[0]);
-    return {
-      analysis:parsed.analysis||res.slice(0,300),
-      new_ids:Array.isArray(parsed.new_ids)?parsed.new_ids.filter(x=>x&&typeof x==='string').slice(0,5):[]
-    };
-  }catch(e){
-    return {analysis:res.slice(0,300),new_ids:[]};
+    
+    statusText.textContent = '就绪';
+  } catch (error) {
+    typingDiv.remove();
+    addMessage(`错误: ${error.message}`, 'system');
+    statusText.textContent = '错误';
+  } finally {
+    sendBtn.disabled = false;
+    input.focus();
   }
 }
 
-async function aiFinalize(target,strategy,foundFindings,analysis){
-  const findingsCtx=foundFindings.map((f,i)=>'['+(i+1)+'] '+f.platform+' | '+(f.username||'')+' | '+(f.url||'')+'\n    '+(f.snippet||'无摘要')).join('\n');
-  const prompt='你是一名专业情报分析师。请基于以下信息生成最终情报档案。\n\n'+
-    '目标: '+target+'\n'+
-    '策略: '+JSON.stringify(strategy)+'\n\n'+
-    '发现线索:\n'+findingsCtx+'\n\n'+
-    '初步分析:\n'+analysis+'\n\n'+
-    '请严格按以下 Markdown 格式输出情报档案：\n\n'+
-    '# 情报档案: '+target+'\n\n'+
-    '## 身份判定\n判断这些账号是否属于同一人/实体，可信度（高/中/低）\n\n'+
-    '## 基本信息\n- 已知姓名/ID/别名\n- 推断职业/身份\n- 推断地区/时区\n- 活跃平台清单\n\n'+
-    '## 账号清单\n| 平台 | 用户名 | 链接 | 备注 |\n|---|---|---|---|\n\n'+
-    '## 关联线索\n跨平台关联点（相同头像/简介/链接/时间模式等）\n\n'+
-    '## 推断画像\n兴趣/立场/活动领域/社交圈\n\n'+
-    '## 风险与不确定性\n- 信息可信度\n- 需要核实的事项\n- 可能的误判\n\n'+
-    '## 来源索引\n[1] 平台 - URL\n[2] ...\n\n'+
-    '注意：信息不足时诚实标注"信息不足"，区分事实与推测，中文输出。';
-  return await aiCall(prompt,cfg.analyzeModel);
-}
-
-// === Main agent loop ===
-const probedKeys=new Set(); // track (platform|username) to avoid duplicate probes
-let totalProbed=0;
-let totalTasks=0;
-
-async function probeVariants(variantList,platforms,label){
-  // Queue all tasks
-  const tasks=[];
-  for(const v of variantList){
-    for(const p of platforms){
-      const key=p.name+'|'+v;
-      if(probedKeys.has(key))continue;
-      probedKeys.add(key);
-      tasks.push({platform:p,username:v});
-    }
+// 检查后端状态
+fetch(`${API_BASE}/api/health`).then(r => r.json()).then(d => {
+  if (d.status === 'ok') {
+    statusText.textContent = `就绪 (${d.sites_loaded} 站点)`;
   }
-  if(tasks.length===0)return;
+}).catch(() => {
+  statusText.textContent = '后端未连接';
+});
 
-  totalTasks+=tasks.length;
-  pushMsg('action','⚡ '+label,'将探测 '+tasks.length+' 个组合（'+variantList.length+' 变体 × '+platforms.length+' 平台）');
-  setStreamStat('探测中 (0/'+totalTasks+')',true);
-
-  const concurrency=Math.min(cfg.concurrency,tasks.length);
-  const pool=[];
-  const localProbed={done:0,total:tasks.length};
-
-  async function runOne(task){
-    addFinding({status:'pending',platform:task.platform.name,username:task.username,url:task.platform.url.replace('{u}',task.username)});
-    const result=await probePlatform(task.platform,task.username);
-    const fIdx=findings.findIndex(f=>f.username===task.username&&f.platform===task.platform.name&&f.status==='pending');
-    if(fIdx>=0){
-      updateFinding(fIdx,result);
-      if(result.status==='found'){
-        pushMsg('ai','✓ 命中','<strong>'+result.platform+'</strong> / '+result.username+'\n'+(result.url||'')+(result.snippet?'\n'+result.snippet.slice(0,150):''));
-      }
-    }
-    totalProbed++;
-    localProbed.done++;
-    setStreamStat('探测中 ('+totalProbed+'/'+totalTasks+')',true);
-  }
-
-  for(const task of tasks){
-    while(pool.length>=concurrency){await Promise.race(pool);pool.splice(pool.indexOf(pool.find(p=>p===pool[0])),1)}
-    const p=runOne(task).then(()=>{const i=pool.indexOf(p);if(i>=0)pool.splice(i,1)});
-    pool.push(p);
-  }
-  await Promise.all(pool);
-}
-
-async function runAgent(target){
-  if(isRunning)return;
-  setStreamStat('启动中',true);
-  findings=[];
-  probedKeys.clear();
-  totalProbed=0;
-  totalTasks=0;
-  renderFindings();
-  pushMsg('user','你',esc(target));
-
-  try{
-    // Step 1: AI plan strategy
-    const m1=pushMsg('ai','Grok 规划中...','<span class="spinner"></span> 正在分析目标并生成搜索策略');
-    const strategy=await aiPlanStrategy(target);
-    updateMsg(m1,'<strong>📋 搜索策略</strong>\n'+
-      '类型: '+strategy.type+'\n'+
-      '主查询: '+strategy.primary_query+'\n'+
-      '变体: '+(strategy.variants||[]).join(', ')+'\n'+
-      '关键词: '+(strategy.keywords||[]).join(', ')+'\n'+
-      '重点平台: '+(strategy.platforms_to_focus||[]).join(', ')+'\n'+
-      '站点标签: '+(strategy.site_tags||[]).join(', ')+'\n'+
-      '策略: '+(strategy.strategy_notes||''));
-
-    // Step 2: Generate variants
-    const allVariants=new Set();
-    allVariants.add(strategy.primary_query);
-    (strategy.variants||[]).forEach(v=>allVariants.add(v));
-    generateVariants(strategy.primary_query).forEach(v=>allVariants.add(v));
-    const variantList=[...allVariants].filter(v=>v&&v.length>1).slice(0,10);
-
-    // Step 2b: Build combined platform list (custom PLATFORMS + Maigret sites by tags)
-    const siteTags=strategy.site_tags||[];
-    let maigretSelected=[];
-    if(siteTags.length>0){
-      maigretSelected=getMaigretSitesByTags(siteTags,40);
-    }
-    // Always include top 20 Maigret sites as baseline
-    const maigretTop=getTopMaigretSites(20);
-    // Merge and deduplicate by name (custom PLATFORMS takes priority)
-    const customNames=new Set(PLATFORMS.map(p=>p.name));
-    const maigretExtra=maigretSelected.filter(s=>!customNames.has(s.name));
-    const maigretTopExtra=maigretTop.filter(s=>!customNames.has(s.name)&&!maigretExtra.find(m=>m.name===s.name));
-    const allPlatforms=[...PLATFORMS,...maigretExtra,...maigretTopExtra];
-
-    pushMsg('action','⚡ 平台列表','自定义平台 '+PLATFORMS.length+' 个 + Maigret 标签匹配 '+maigretExtra.length+' 个 + 热门 '+maigretTopExtra.length+' 个 = 共 '+allPlatforms.length+' 个平台');
-
-    // Step 3: First round probing (direct URL)
-    await probeVariants(variantList,allPlatforms,'第 1 层探测');
-
-    // Step 3b: Search engine probing (DuckDuckGo/Bing/Yandex + content crawling)
-    setStreamStat('搜索引擎探测中',true);
-    pushMsg('action','🔍 搜索引擎探测','开始用搜索引擎查找 '+strategy.primary_query+' 的相关网页并爬取内容');
-    totalTasks+=5; // Reserve for search engine results
-    const searchResults=await searchEngineProbe(strategy.primary_query,5);
-
-    setStreamStat('分析中',true);
-    let foundFindings=findings.filter(f=>f.status==='found');
-    pushMsg('action','⚡ 探测完成','共探测 '+totalProbed+' 个组合，命中 '+foundFindings.length+' 条（含搜索引擎 '+searchResults.length+' 条）');
-
-    if(foundFindings.length===0){
-      pushMsg('system','系统','所有平台均未命中。可能原因：\n1. 用户名非常独特，未在任何主流平台注册\n2. 用户名拼写不同\n3. 平台探测被反爬阻断');
-      setStreamStat('完成（无命中）',false);
-      const archive='## 情报档案: '+target+'\n\n**状态：未发现任何公开账号**\n\n'+
-        '### 搜索范围\n- 变体：'+variantList.join(', ')+'\n- 平台：'+allPlatforms.length+' 个平台（自定义 '+PLATFORMS.length+' + Maigret '+(allPlatforms.length-PLATFORMS.length)+'）\n- 搜索引擎：DuckDuckGo/Bing/Yandex\n\n'+
-        '### 可能原因\n1. 该用户名非常独特，未在主流平台注册\n2. 使用了不同的用户名变体\n3. 账号设置为私密或已删除\n4. 平台反爬机制阻断探测\n\n'+
-        '### 建议\n1. 尝试其他可能的用户名变体\n2. 手动检查特定平台\n3. 通过关联人物反查';
-      showArchive(archive);
-      saveHistory(target,strategy,foundFindings,archive);
-      return;
-    }
-
-    // Step 4: AI analyze (returns {analysis, new_ids})
-    const m4=pushMsg('ai','Grok 分析中...','<span class="spinner"></span> 正在分析 '+foundFindings.length+' 条命中线索');
-    const analysisResult=await aiAnalyzeFindings(target,strategy,foundFindings);
-    updateMsg(m4,'<strong>🔍 线索分析</strong>\n'+analysisResult.analysis);
-
-    // Step 4b: Recursive search (max 2 levels)
-    const MAX_RECURSION=2;
-    let currentAnalysis=analysisResult.analysis;
-    for(let level=1;level<=MAX_RECURSION;level++){
-      const newIds=level===1?analysisResult.new_ids:[];
-      if(!newIds||newIds.length===0)break;
-
-      // Deduplicate against already-probed variants
-      const probedVariants=new Set();
-      findings.forEach(f=>probedVariants.add(f.username));
-      const freshIds=newIds.filter(id=>{
-        const clean=id.replace(/^@/,'').trim();
-        return clean.length>1&&!probedVariants.has(clean);
-      });
-
-      if(freshIds.length===0){
-        pushMsg('system','系统','第 '+level+' 层递归：无新 ID 可探测');
-        break;
-      }
-
-      pushMsg('action','🔍 第 '+level+' 层递归搜索','发现新 ID: '+freshIds.join(', ')+'，开始探测');
-
-      // For recursion, focus on key platforms (custom + top Maigret) to avoid combinatorial explosion
-      const focusPlatformNames=['GitHub','Reddit','X/Twitter','Twitter','Instagram','YouTube','Telegram','Mastodon','Twitch','Medium','DEV Community','TikTok','Facebook','LinkedIn','Pinterest','Tumblr','Spotify','SoundCloud','Vimeo'];
-      const focusPlatforms=allPlatforms.filter(p=>focusPlatformNames.includes(p.name));
-
-      await probeVariants(freshIds,focusPlatforms,'第 '+(level+1)+' 层探测');
-
-      // Re-analyze with new findings
-      foundFindings=findings.filter(f=>f.status==='found');
-      pushMsg('action','⚡ 递归探测完成','累计探测 '+totalProbed+' 个组合，命中 '+foundFindings.length+' 条');
-
-      const mRec=pushMsg('ai','Grok 再分析中...','<span class="spinner"></span> 正在分析累计 '+foundFindings.length+' 条命中线索');
-      const recResult=await aiAnalyzeFindings(target,strategy,foundFindings);
-      updateMsg(mRec,'<strong>🔍 第 '+level+' 层分析</strong>\n'+recResult.analysis);
-      currentAnalysis=recResult.analysis;
-
-      // If no more new IDs, break early
-      if(!recResult.new_ids||recResult.new_ids.length===0){
-        pushMsg('system','系统','第 '+level+' 层递归：未发现更多新 ID，停止递归');
-        break;
-      }
-      // Update for next iteration
-      if(level<MAX_RECURSION){
-        analysisResult.new_ids=recResult.new_ids;
-      }
-    }
-
-    // Step 5: AI finalize
-    const m5=pushMsg('ai','Grok 整理档案中...','<span class="spinner"></span> 使用 '+cfg.analyzeModel+' 生成最终档案');
-    const archive=await aiFinalize(target,strategy,foundFindings,currentAnalysis);
-    updateMsg(m5,'<strong>📋 档案已生成</strong>（查看右侧"档案"标签）');
-    showArchive(archive);
-    saveHistory(target,strategy,foundFindings,archive);
-
-    setStreamStat('完成',false);
-    pushMsg('system','系统','✅ 情报收集完成。累计探测 '+totalProbed+' 个组合，命中 '+foundFindings.length+' 条，档案已归档。');
-    toast('情报归档完成','ok');
-
-  }catch(e){
-    setStreamStat('错误',false);
-    pushMsg('error','错误',esc(e.message||''));
-    toast('执行失败: '+e.message,'err');
-  }
-}
-
-function showArchive(archive){
-  currentArchive=archive;
-  $('archiveEmpty').style.display='none';
-  $('archiveBox').style.display='block';
-  $('archiveBody').innerHTML=md2html(archive);
-  // Switch to archive tab
-  document.querySelectorAll('.right-tab').forEach(x=>x.classList.remove('active'));
-  document.querySelector('[data-tab="archive"]').classList.add('active');
-  document.querySelectorAll('.tab-pane').forEach(p=>p.style.display='none');
-  $('tab-archive').style.display='block';
-}
-
-function saveHistory(target,strategy,foundFindings,archive){
-  history.unshift({
-    target:target,
-    ts:Date.now(),
-    foundCount:foundFindings.length,
-    variants:strategy.variants||[],
-    platforms:strategy.platforms_to_focus||[],
-    archive:archive,
-    findings:foundFindings.map(f=>({platform:f.platform,username:f.username,url:f.url,snippet:f.snippet}))
-  });
-  history=history.slice(0,20);
-  localStorage.setItem(HIST_KEY,JSON.stringify(history));
-  renderHistory();
-}
-
-function renderHistory(){
-  const list=$('historyList');
-  if(!history.length){list.innerHTML='<div class="empty"><div class="icon">📚</div><p>暂无历史</p></div>';return}
-  list.innerHTML=history.map((h,i)=>{
-    const d=new Date(h.ts);
-    return '<div class="history-item" data-idx="'+i+'"><div class="name">'+esc(h.target)+'</div><div class="meta">'+d.toLocaleString()+' · 命中 '+h.foundCount+' · 变体 '+(h.variants?.length||0)+'</div></div>';
-  }).join('');
-  list.querySelectorAll('.history-item').forEach(el=>{
-    el.onclick=()=>{
-      const h=history[parseInt(el.dataset.idx)];
-      showArchive(h.archive);
-      // Also load findings
-      findings=h.findings?.map(f=>({...f,status:'found'}))||[];
-      renderFindings();
-    };
-  });
-}
-
-// === Send ===
-$('sendBtn').onclick=()=>{
-  const txt=$('userInput').value.trim();
-  if(!txt||isRunning)return;
-  $('userInput').value='';
-  runAgent(txt);
-};
-$('userInput').addEventListener('keydown',e=>{if(e.key==='Enter')$('sendBtn').click()});
-
-// === Export ===
-$('exportMd').onclick=()=>{
-  if(!currentArchive){toast('无档案','err');return}
-  const blob=new Blob([currentArchive],{type:'text/markdown'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
-  a.download='osint-'+Date.now()+'.md';a.click();toast('已导出','ok');
-};
-$('exportJson').onclick=()=>{
-  const data={archive:currentArchive,findings:findings,ts:Date.now()};
-  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
-  a.download='osint-'+Date.now()+'.json';a.click();toast('已导出','ok');
-};
-$('copyMd').onclick=()=>{
-  if(!currentArchive){toast('无档案','err');return}
-  navigator.clipboard.writeText(currentArchive).then(()=>toast('已复制','ok'));
-};
-$('regenBtn').onclick=async()=>{
-  if(!findings.length){toast('无线索','err');return}
-  const btn=$('regenBtn');btn.disabled=true;btn.textContent='⏳ 重新整理中...';
-  try{
-    const found=findings.filter(f=>f.status==='found');
-    const archive=await aiFinalize('重新整理',{},found,'');
-    showArchive(archive);
-    toast('已重新整理','ok');
-  }catch(e){toast('失败: '+e.message,'err')}
-  finally{btn.disabled=false;btn.textContent='🔄 重新整理'}
-};
-
-// === Utils ===
-function esc(s){return (s||'').replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]))}
-function md2html(md){
-  if(!md)return '';
-  let h=esc(md);
-  h=h.replace(/```(\w*)\n([\s\S]*?)```/g,(_,l,c)=>'<pre><code>'+c+'</code></pre>');
-  h=h.replace(/`([^`\n]+)`/g,'<code>$1</code>');
-  h=h.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
-  h=h.replace(/^### (.+)$/gm,'<h3>$1</h3>');
-  h=h.replace(/^## (.+)$/gm,'<h2>$1</h2>');
-  h=h.replace(/^# (.+)$/gm,'<h1>$1</h1>');
-  h=h.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
-  h=h.replace(/(?:^|\n)((?:- .+(?:\n|$))+)/g,m=>'<ul>'+m.trim().split('\n').map(l=>'<li>'+l.replace(/^- /,'')+'</li>').join('')+'</ul>');
-  h=h.replace(/(?:^|\n)((?:\d+\. .+(?:\n|$))+)/g,m=>'<ol>'+m.trim().split('\n').map(l=>'<li>'+l.replace(/^\d+\. /,'')+'</li>').join('')+'</ol>');
-  // Tables
-  h=h.replace(/(?:^|\n)(\|[^\n]+\|\n\|[\s|:-]+\|\n(?:\|[^\n]+\|\n?)+)/g,m=>{
-    const lines=m.trim().split('\n');
-    if(lines.length<3)return m;
-    const header=lines[0].split('|').filter(Boolean).map(c=>'<th>'+c.trim()+'</th>').join('');
-    const rows=lines.slice(2).map(l=>'<tr>'+l.split('|').filter(Boolean).map(c=>'<td>'+c.trim()+'</td>').join('')+'</tr>').join('');
-    return '<table style="width:100%;border-collapse:collapse;font-size:12px;margin:8px 0"><thead><tr>'+header+'</tr></thead><tbody>'+rows+'</tbody></table>';
-  });
-  h=h.split(/\n{2,}/).map(p=>/^<(h\d|ul|ol|pre|blockquote|table)/.test(p.trim())?p:'<p>'+p.replace(/\n/g,'<br>')+'</p>').join('\n');
-  return h;
-}
-
-function toast(msg,type){
-  const t=document.createElement('div');t.className='toast '+(type||'');t.textContent=msg;
-  document.body.appendChild(t);
-  setTimeout(()=>{t.style.opacity='0';t.style.transition='opacity .3s';setTimeout(()=>t.remove(),300)},2500);
-}
+input.focus();
 </script>
 </body>
 </html>
