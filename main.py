@@ -138,6 +138,14 @@ async def search(req: SearchRequest):
     results = await search_engines.search_and_crawl(req.query, req.max_results)
     return {"query": req.query, "results": results, "count": len(results)}
 
+@app.post("/api/grok-search")
+async def grok_search(target: str):
+    """利用 Grok AI 的实时搜索能力搜索目标用户名。
+    Grok 会自动搜索互联网，访问网站，返回带引用链接的结果。
+    """
+    result = ai_analyzer.grok_search(target)
+    return result
+
 @app.post("/api/strategy")
 async def plan_strategy(req: StrategyRequest):
     """AI 策略规划"""
@@ -217,6 +225,19 @@ async def run_full_osint(req: RunRequest):
                 "snippet": f"标题: {r.get('title', '')} | 内容: {r.get('snippet', '')}",
             })
 
+        # Step 5.5: Grok AI 实时搜索（核心能力：Grok 自带的搜索爬虫）
+        grok_result = ai_analyzer.grok_search(target)
+        grok_platforms = grok_result.get("platforms", [])
+        for p in grok_platforms:
+            all_findings.append({
+                "status": "found",
+                "platform": p.get("platform", "Grok搜索"),
+                "username": target,
+                "url": p.get("url", ""),
+                "snippet": p.get("snippet", ""),
+            })
+        grok_summary = grok_result.get("summary", "")
+
         # Step 6: AI 分析
         analysis_result = ai_analyzer.analyze_findings(target, strategy, all_findings)
         analysis = analysis_result.get("analysis", "")
@@ -251,6 +272,7 @@ async def run_full_osint(req: RunRequest):
             "total_findings": len(all_findings),
             "findings": all_findings,
             "analysis": analysis,
+            "grok_summary": grok_summary,
             "archive": archive,
         }
 

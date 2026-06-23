@@ -1,7 +1,11 @@
-"""AI 分析模块：调用 Grok AI 进行 OSINT 情报分析。"""
+"""AI 分析模块：调用 Grok AI 进行 OSINT 情报分析。
+
+利用 Grok 的实时搜索能力（思维链 + 网页爬虫）进行深度情报收集。
+"""
 
 import httpx
 import json
+import re
 
 # Grok API 后端配置
 GROK_BASE_URL = "https://grok2api-2-hpc2.onrender.com"
@@ -10,16 +14,17 @@ GROK_ENDPOINT = f"{GROK_BASE_URL}/v1/chat/completions"
 
 # 模型常量
 MODEL_FAST = "grok-4.20-fast"  # 快速规划
-MODEL_DEEP = "grok-4.20-0309-non-reasoning"  # 深度分析
+MODEL_DEEP = "grok-4.20-0309-non-reasoning"  # 深度分析 + 实时搜索
 
 
-def call_grok(messages: list[dict], model: str = "grok-4.20-fast", temperature: float = 0.7) -> str:
+def call_grok(messages: list[dict], model: str = MODEL_DEEP, temperature: float = 0.7, timeout: float = 120.0) -> str:
     """通用 Grok API 调用函数。
 
     Args:
         messages: OpenAI 兼容的 messages 列表
-        model: 模型名称
+        model: 模型名称（默认用 DEEP 模型，支持搜索）
         temperature: 采样温度
+        timeout: 超时时间（秒），搜索任务需要更长
 
     Returns:
         模型生成的文本内容；调用失败时返回空字符串
@@ -33,17 +38,151 @@ def call_grok(messages: list[dict], model: str = "grok-4.20-fast", temperature: 
         "messages": messages,
         "temperature": temperature,
         "max_tokens": 4000,
+        "stream": False,
     }
     try:
-        with httpx.Client(timeout=60.0) as client:
+        with httpx.Client(timeout=timeout) as client:
             resp = client.post(GROK_ENDPOINT, headers=headers, json=payload)
             resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
+            # 尝试 JSON 解析，失败则尝试原始文本
+            try:
+                data = resp.json()
+                return data["choices"][0]["message"]["content"]
+            except Exception:
+                # 可能是 SSE 流式响应，尝试解析最后一行 data
+                raw = resp.text
+                for line in reversed(raw.split("\n")):
+                    line = line.strip()
+                    if line.startswith("data: ") and line != "data: [DONE]":
+                        try:
+                            d = json.loads(line[6:])
+                            content = d.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                            if content:
+                                return content
+                        except Exception:
+                            continue
+                return ""
     except Exception as e:
-        # 捕获所有异常，失败返回空字符串
         print(f"[call_grok] 调用失败: {e}")
         return ""
+
+
+def grok_search(target: str) -> dict:
+    """利用 Grok 的实时搜索能力搜索目标用户名。
+
+    Grok 会自动搜索互联网，访问网站，返回带引用链接的结果。
+    这是核心优势：Grok 自带的搜索 AI 爬虫。
+
+    Args:
+        target: 目标用户名
+
+    Returns:
+        {
+            "summary": "Grok 的搜索总结",
+            "platforms": [{"platform": "...", "url": "...", "snippet": "..."}],
+            "raw": "原始回复"
+        }
+    """
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                f"Search the web for the username '{target}'. "
+                f"Find all platforms where this username has an account. "
+                f"Check GitHub, Reddit, Twitter/X, Instagram, Facebook, TikTok, "
+                f"YouTube, Twitch, Discord, Steam, Pinterest, LinkedIn, Tumblr, "
+                f"DeviantArt, Flickr, SoundCloud, Spotify, Medium, Patreon, etc. "
+                f"For each platform found, provide the profile URL. "
+                f"Also search for any personal information, real name, location, "
+                f"bio, and linked accounts associated with this username."
+            ),
+        }
+    ]
+    text = call_grok(messages, model=MODEL_DEEP, temperature=0.7, timeout=180.0)
+
+    if not text:
+        return {"summary": "", "platforms": [], "raw": ""}
+
+    # 解析引用链接 [[N]](url) 格式
+    platforms = []
+    seen_urls = set()
+
+    # 提取所有引用链接
+    citations = re.findall(r'\[\[(\d+)\]\]\((https?://[^\s)]+)\)', text)
+    for num, url in citations:
+        if url not in seen_urls:
+            seen_urls.add(url)
+            # 从 URL 推断平台名
+            platform = _infer_platform(url)
+            platforms.append({"platform": platform, "url": url, "snippet": ""})
+
+    # 提取 Markdown 链接 [text](url)
+    md_links = re.findall(r'\[([^\]]+)\]\((https?://[^\s)]+)\)', text)
+    for link_text, url in md_links:
+        if url not in seen_urls and not url.startswith("#"):
+            seen_urls.add(url)
+            platform = _infer_platform(url)
+            platforms.append({"platform": platform or link_text, "url": url, "snippet": link_text})
+
+    # 提取裸 URL
+    bare_urls = re.findall(r'(https?://[^\s\]\)]+)', text)
+    for url in bare_urls:
+        url = url.rstrip(".,;")
+        if url not in seen_urls:
+            seen_urls.add(url)
+            platform = _infer_platform(url)
+            if platform:
+                platforms.append({"platform": platform, "url": url, "snippet": ""})
+
+    return {
+        "summary": text[:2000],
+        "platforms": platforms,
+        "raw": text,
+    }
+
+
+def _infer_platform(url: str) -> str:
+    """从 URL 推断平台名称"""
+    url_lower = url.lower()
+    platform_map = {
+        "github.com": "GitHub",
+        "reddit.com": "Reddit",
+        "twitter.com": "Twitter",
+        "x.com": "X",
+        "instagram.com": "Instagram",
+        "facebook.com": "Facebook",
+        "tiktok.com": "TikTok",
+        "youtube.com": "YouTube",
+        "twitch.tv": "Twitch",
+        "discord.com": "Discord",
+        "discord.gg": "Discord",
+        "steamcommunity.com": "Steam",
+        "pinterest.com": "Pinterest",
+        "linkedin.com": "LinkedIn",
+        "tumblr.com": "Tumblr",
+        "deviantart.com": "DeviantArt",
+        "flickr.com": "Flickr",
+        "soundcloud.com": "SoundCloud",
+        "spotify.com": "Spotify",
+        "medium.com": "Medium",
+        "patreon.com": "Patreon",
+        "gitlab.com": "GitLab",
+        "stackoverflow.com": "StackOverflow",
+        "hackernews": "HackerNews",
+        "producthunt.com": "ProductHunt",
+        "behance.net": "Behance",
+        "dribbble.com": "Dribbble",
+        "mastodon": "Mastodon",
+        "telegram.me": "Telegram",
+        "t.me": "Telegram",
+        "vk.com": "VK",
+        "weibo.com": "Weibo",
+        "bilibili.com": "Bilibili",
+    }
+    for domain, name in platform_map.items():
+        if domain in url_lower:
+            return name
+    return ""
 
 
 def _parse_json(text: str) -> dict | None:
