@@ -59,6 +59,11 @@ class SearchRequest(BaseModel):
     query: str
     max_results: int = 5
 
+class ChatRequest(BaseModel):
+    message: str  # 用户消息
+    target: Optional[str] = None  # 当前调查目标（可选）
+    history: list[dict] = []  # 聊天历史
+
 class AnalyzeRequest(BaseModel):
     target: str
     findings: list[dict] = []
@@ -145,6 +150,105 @@ async def grok_search(target: str):
     """
     result = ai_analyzer.grok_search(target)
     return result
+
+@app.post("/api/chat")
+async def chat(req: ChatRequest):
+    """聊天 + 情报收集同步进行。
+    
+    用户可以像和 ChatGPT 聊天一样输入消息。
+    如果消息中包含用户名或搜索请求，AI 会自动触发 OSINT 收集。
+    聊天和情报收集同步进行。
+    """
+    import re, asyncio
+    
+    message = req.message.strip()
+    target = req.target
+    
+    # 自动检测消息中的用户名（@username 或 "搜索 xxx" 命令）
+    detected_target = None
+    if not target:
+        # 检测 "搜索 xxx" 或 "查找 xxx" 命令
+        cmd_match = re.search(r'(?:搜索|查找|调查|查一下|search|find|lookup)\s+[@]?(\w+)', message, re.I)
+        if cmd_match:
+            detected_target = cmd_match.group(1)
+        else:
+            # 检测 @username
+            at_match = re.search(r'@(\w{3,30})', message)
+            if at_match:
+                detected_target = at_match.group(1)
+    else:
+        detected_target = target
+    
+    # 如果检测到目标，执行情报收集
+    osint_results = None
+    if detected_target:
+        # 同时执行：Grok 搜索 + Maigret 探测
+        try:
+            # 1. Grok 实时搜索（Grok 自带的搜索爬虫）
+            grok_result = ai_analyzer.grok_search(detected_target)
+            
+            # 2. Maigret 探测（top 30 站点，快速扫描）
+            sites = maigret_sites.get_top_sites(30)
+            probe_results = await probes.probe_batch(sites, detected_target, 10)
+            found_probes = [r for r in probe_results if r.get("status") == "found"]
+            
+            osint_results = {
+                "target": detected_target,
+                "grok_search": grok_result,
+                "maigret_found": found_probes,
+                "maigret_total": len(probe_results),
+            }
+        except Exception as e:
+            osint_results = {"error": str(e)}
+    
+    # 构建 Grok 聊天消息
+    messages = []
+    
+    # 系统提示
+    system_content = (
+        "你是一名 OSINT 情报分析智能体。用户和你聊天时，你可以：\n"
+        "1. 回答用户的问题\n"
+        "2. 如果用户提到用户名或要求搜索，自动进行情报收集\n"
+        "3. 分析情报结果，提供见解\n"
+        "4. 用中文回复，格式清晰\n"
+    )
+    if osint_results:
+        system_content += (
+            f"\n当前调查目标: {detected_target}\n"
+            f"情报收集结果:\n"
+        )
+        grok_data = osint_results.get("grok_search", {})
+        if grok_data.get("summary"):
+            system_content += f"\nGrok 搜索总结:\n{grok_data['summary'][:1500]}\n"
+        if grok_data.get("platforms"):
+            system_content += f"\nGrok 发现的平台:\n"
+            for p in grok_data["platforms"][:10]:
+                system_content += f"- [{p.get('platform', '?')}] {p.get('url', '')}\n"
+        maigret_found = osint_results.get("maigret_found", [])
+        if maigret_found:
+            system_content += f"\nMaigret 探测命中 ({len(maigret_found)} 个):\n"
+            for f in maigret_found[:10]:
+                system_content += f"- [{f.get('platform', '?')}] {f.get('url', '')}\n"
+                if f.get("snippet"):
+                    system_content += f"  → {f['snippet'][:100]}\n"
+    
+    messages.append({"role": "system", "content": system_content})
+    
+    # 添加聊天历史
+    for h in req.history[-5:]:  # 最多保留最近 5 条历史
+        messages.append(h)
+    
+    # 添加当前消息
+    messages.append({"role": "user", "content": message})
+    
+    # 调用 Grok 生成回复
+    reply = ai_analyzer.call_grok(messages, model=ai_analyzer.MODEL_DEEP, temperature=0.7, timeout=120.0)
+    
+    return {
+        "reply": reply,
+        "target": detected_target,
+        "osint_results": osint_results,
+    }
 
 @app.post("/api/strategy")
 async def plan_strategy(req: StrategyRequest):

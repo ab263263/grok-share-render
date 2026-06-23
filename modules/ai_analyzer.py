@@ -12,9 +12,10 @@ GROK_BASE_URL = "https://grok2api-2-hpc2.onrender.com"
 GROK_API_KEY = "c9d05cfdfd6b4dbc8f13f474"
 GROK_ENDPOINT = f"{GROK_BASE_URL}/v1/chat/completions"
 
-# 模型常量
-MODEL_FAST = "grok-4.20-fast"  # 快速规划
-MODEL_DEEP = "grok-4.20-0309-non-reasoning"  # 深度分析 + 实时搜索
+# 模型常量（grok2api 后端支持的 3 个模型）
+MODEL_FAST = "grok-4.20-fast"  # 快速响应
+MODEL_DEEP = "grok-4.20-0309-non-reasoning"  # 深度分析 + 实时搜索（无推理链，低延迟）
+MODEL_REASONING = "grok-4.20-0309-reasoning"  # 推理模式（扩展思维链，深度思考）
 
 
 def call_grok(messages: list[dict], model: str = MODEL_DEEP, temperature: float = 0.7, timeout: float = 120.0) -> str:
@@ -70,8 +71,8 @@ def call_grok(messages: list[dict], model: str = MODEL_DEEP, temperature: float 
 def grok_search(target: str) -> dict:
     """利用 Grok 的实时搜索能力搜索目标用户名。
 
-    Grok 会自动搜索互联网，访问网站，返回带引用链接的结果。
-    这是核心优势：Grok 自带的搜索 AI 爬虫。
+    Grok 会自动搜索互联网，访问网站，爬取网页内容，
+    然后总结提炼信息。这是核心优势：Grok 自带的搜索 AI 爬虫。
 
     Args:
         target: 目标用户名
@@ -80,6 +81,7 @@ def grok_search(target: str) -> dict:
         {
             "summary": "Grok 的搜索总结",
             "platforms": [{"platform": "...", "url": "...", "snippet": "..."}],
+            "personal_info": {"name": "...", "location": "...", "email": "...", ...},
             "raw": "原始回复"
         }
     """
@@ -88,20 +90,27 @@ def grok_search(target: str) -> dict:
             "role": "user",
             "content": (
                 f"Search the web for the username '{target}'. "
-                f"Find all platforms where this username has an account. "
+                f"Find ALL platforms where this username has an account. "
                 f"Check GitHub, Reddit, Twitter/X, Instagram, Facebook, TikTok, "
                 f"YouTube, Twitch, Discord, Steam, Pinterest, LinkedIn, Tumblr, "
-                f"DeviantArt, Flickr, SoundCloud, Spotify, Medium, Patreon, etc. "
-                f"For each platform found, provide the profile URL. "
-                f"Also search for any personal information, real name, location, "
-                f"bio, and linked accounts associated with this username."
+                f"DeviantArt, Flickr, SoundCloud, Spotify, Medium, Patreon, etc.\n\n"
+                f"For each platform found:\n"
+                f"1. Provide the profile URL\n"
+                f"2. Extract any personal information (real name, bio, location, email, age)\n"
+                f"3. Note the account creation date if visible\n"
+                f"4. Note follower/following counts if visible\n\n"
+                f"Also search for any leaked data, breach records, or public records "
+                f"associated with this username. Search X/Twitter for posts mentioning "
+                f"this username.\n\n"
+                f"Finally, provide a comprehensive summary of everything you found, "
+                f"including a risk assessment and recommended next steps for investigation."
             ),
         }
     ]
     text = call_grok(messages, model=MODEL_DEEP, temperature=0.7, timeout=180.0)
 
     if not text:
-        return {"summary": "", "platforms": [], "raw": ""}
+        return {"summary": "", "platforms": [], "personal_info": {}, "raw": ""}
 
     # 解析引用链接 [[N]](url) 格式
     platforms = []
@@ -112,7 +121,6 @@ def grok_search(target: str) -> dict:
     for num, url in citations:
         if url not in seen_urls:
             seen_urls.add(url)
-            # 从 URL 推断平台名
             platform = _infer_platform(url)
             platforms.append({"platform": platform, "url": url, "snippet": ""})
 
@@ -134,11 +142,77 @@ def grok_search(target: str) -> dict:
             if platform:
                 platforms.append({"platform": platform, "url": url, "snippet": ""})
 
+    # 提取个人信息
+    personal_info = _extract_personal_info(text)
+
     return {
         "summary": text[:2000],
         "platforms": platforms,
+        "personal_info": personal_info,
         "raw": text,
     }
+
+
+def _extract_personal_info(text: str) -> dict:
+    """从 Grok 回复中提取个人信息"""
+    info = {}
+
+    # 提取邮箱
+    emails = re.findall(r'[\w.+-]+@[\w-]+\.[\w.-]+', text)
+    if emails:
+        info["emails"] = list(set(emails))[:5]
+
+    # 提取电话号码
+    phones = re.findall(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', text)
+    if phones:
+        info["phones"] = list(set(phones))[:3]
+
+    # 提取位置信息
+    loc_match = re.search(r'(?:location|位置|地点|地址|based in|from)\s*[:：]?\s*([^\n,]{3,50})', text, re.I)
+    if loc_match:
+        info["location"] = loc_match.group(1).strip()
+
+    # 提取真实姓名
+    name_match = re.search(r'(?:real name|真实姓名|本名|name)\s*[:：]?\s*([^\n,]{3,50})', text, re.I)
+    if name_match:
+        info["real_name"] = name_match.group(1).strip()
+
+    # 提取年龄
+    age_match = re.search(r'(?:age|年龄|岁)\s*[:：]?\s*(\d{1,3})', text, re.I)
+    if age_match:
+        info["age"] = age_match.group(1)
+
+    return info
+
+
+def grok_deep_analysis(target: str, findings: list[dict]) -> str:
+    """使用推理模式进行深度情报分析。
+
+    利用 Grok 的扩展思维链，对收集到的情报进行深度分析。
+    """
+    findings_text = ""
+    for f in findings[:20]:
+        findings_text += f"- [{f.get('platform', '?')}] {f.get('url', '')}\n"
+        if f.get("snippet"):
+            findings_text += f"  → {f['snippet'][:150]}\n"
+
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                f"你是 OSINT 情报分析专家。目标用户名: {target}\n\n"
+                f"收集到的情报:\n{findings_text}\n\n"
+                f"请进行深度分析：\n"
+                f"1. 交叉验证：哪些账号可能是同一人？\n"
+                f"2. 时间线分析：账号创建时间、活动模式\n"
+                f"3. 社交网络图谱：账号之间的关联\n"
+                f"4. 风险评估：虚假账号、机器人、钓鱼可能性\n"
+                f"5. 推荐下一步：还需要搜索什么？\n\n"
+                f"用中文回复，格式清晰。"
+            ),
+        }
+    ]
+    return call_grok(messages, model=MODEL_REASONING, temperature=0.7, timeout=180.0)
 
 
 def _infer_platform(url: str) -> str:
