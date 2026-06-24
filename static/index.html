@@ -478,16 +478,16 @@ body::before {
       <div class="feature"><strong>3</strong> 搜索引擎</div>
     </div>
     <div class="suggestions" style="justify-content:center;margin-top:20px;">
-      <span class="suggestion" onclick="sendSuggestion('搜索 darkyokail')">🔍 搜索 darkyokail</span>
-      <span class="suggestion" onclick="sendSuggestion('搜索 darkyokail 在所有 1836 个站点')">� 全站搜索</span>
-      <span class="suggestion" onclick="sendSuggestion('搜索 darkyokail 在游戏平台')">🎮 游戏平台</span>
-      <span class="suggestion" onclick="sendSuggestion('深度分析 darkyokail')">🧠 深度分析</span>
+      <span class="suggestion" onclick="sendSuggestion('搜索 johnsmith')">🔍 搜索 johnsmith</span>
+      <span class="suggestion" onclick="sendSuggestion('全站搜索 testuser')">📋 全站搜索</span>
+      <span class="suggestion" onclick="sendSuggestion('搜索 gamer123 在游戏平台')">🎮 游戏平台</span>
+      <span class="suggestion" onclick="sendSuggestion('深度分析 alex_dev')">🧠 深度分析</span>
     </div>
   </div>
 </div>
 <div class="input-area" id="input-area">
   <div class="input-wrapper">
-    <input type="text" id="input" placeholder="输入指令，例如：搜索 darkyokail、全站搜索 johnsmith、深度分析 testuser" onkeypress="if(event.key==='Enter')sendMessage()">
+    <input type="text" id="input" placeholder="输入指令，例如：搜索 johnsmith、全站搜索 testuser、深度分析 alex_dev" onkeypress="if(event.key==='Enter')sendMessage()">
     <button id="send-btn" onclick="sendMessage()">发送</button>
   </div>
 </div>
@@ -511,7 +511,7 @@ function switchMode(mode) {
     document.getElementById('chat-mode').style.display = '';
     document.getElementById('search-mode').style.display = 'none';
     inputArea.style.display = '';
-    input.placeholder = '输入用户名或消息，例如：搜索 darkyokail';
+    input.placeholder = '输入用户名或消息，例如：搜索 johnsmith';
   } else {
     document.querySelector('.mode-btn[onclick*="search"]').classList.add('active');
     document.getElementById('chat-mode').style.display = 'none';
