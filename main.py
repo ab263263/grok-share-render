@@ -253,8 +253,7 @@ async def chat(req: ChatRequest):
         run_full_search = any(kw in msg_lower for kw in ["全站", "所有站点", "1836", "全部", "all"])
         run_game_only = any(kw in msg_lower for kw in ["游戏平台", "游戏", "game", "lol", "wg", "steam"])
         run_deep_analysis = any(kw in msg_lower for kw in ["深度分析", "深度", "分析", "deep", "analyze"])
-        run_grok_search = not run_game_only  # 默认执行 Grok 搜索，除非只搜游戏
-        use_grok_probe = any(kw in msg_lower for kw in ["grok 探测", "grok 搜索", "ai 探测", "智能探测"])  # 使用 Grok 批量探测
+        use_grok_probe = any(kw in msg_lower for kw in ["grok 探测", "grok 搜索", "ai 探测", "智能探测"])
 
         try:
             grok_result = None
@@ -267,64 +266,73 @@ async def chat(req: ChatRequest):
             # 发送进度
             await progress_queue.put({"message": "📝 解析指令...", "done": False})
 
-            # 1. Grok 实时搜索（除非只搜游戏平台）
-            if run_grok_search:
-                await progress_queue.put({"message": "🔍 启动 Grok 实时搜索...", "done": False})
-                # 提供 top 50 站点列表给 Grok，提高搜索覆盖率
-                grok_sites = maigret_sites.get_top_sites(50)
-                grok_result = ai_analyzer.grok_search(detected_target, sites=grok_sites)
+            # === 并发执行 Grok 搜索 + Maigret 探测 + 游戏平台 ===
+            import asyncio as _asyncio
 
-            # 2. Maigret 探测
-            if run_full_search:
-                if use_grok_probe:
-                    # 使用 Grok 批量探测（替代 Python httpx）
-                    await progress_queue.put({"message": "🤖 启动 Grok 智能探测 1836 个站点...", "done": False})
-                    sites = maigret_sites.get_top_sites(0)  # 0 = 全部
-                    
-                    # 创建异步进度回调
-                    async def grok_progress(current, total, msg):
-                        await progress_queue.put({"message": msg, "done": current == total})
-                    
-                    # 调用异步 Grok 批量探测
-                    found_probes = await ai_analyzer.grok_batch_probe(
-                        detected_target, 
-                        sites, 
-                        batch_size=50,
-                        progress_callback=grok_progress
-                    )
-                    probe_total = len(sites)
-                    await progress_queue.put({"message": f"✅ Grok 探测完成，发现 {len(found_probes)} 个命中", "done": False})
-                else:
-                    # 使用 Python httpx 探测
-                    await progress_queue.put({"message": "📋 全站搜索 1836 个站点...", "done": False})
-                    # 全站搜索（1836 站点）
-                    sites = maigret_sites.get_top_sites(0)  # 0 = 全部
-                    probe_results = await probes.probe_batch(sites, detected_target, 20)
+            async def _do_grok_search():
+                """Grok 实时搜索（异步包装）"""
+                nonlocal grok_result
+                await progress_queue.put({"message": "🔍 启动 Grok 实时搜索...", "done": False})
+                grok_sites = maigret_sites.get_top_sites(50)
+                # grok_search 是同步函数，放到线程池执行
+                loop = _asyncio.get_event_loop()
+                grok_result = await loop.run_in_executor(None, ai_analyzer.grok_search, detected_target, grok_sites)
+                await progress_queue.put({"message": f"✅ Grok 搜索完成", "done": False})
+
+            async def _do_maigret_probe():
+                """Maigret 站点探测"""
+                nonlocal found_probes, probe_total
+                if run_full_search:
+                    if use_grok_probe:
+                        await progress_queue.put({"message": "🤖 启动 Grok 智能探测 1836 个站点...", "done": False})
+                        sites = maigret_sites.get_top_sites(0)
+                        async def grok_progress(current, total, msg):
+                            await progress_queue.put({"message": msg, "done": current == total})
+                        found_probes = await ai_analyzer.grok_batch_probe(
+                            detected_target, sites, batch_size=50, progress_callback=grok_progress
+                        )
+                        probe_total = len(sites)
+                    else:
+                        await progress_queue.put({"message": "📋 全站搜索 1836 个站点（并发 20）...", "done": False})
+                        sites = maigret_sites.get_top_sites(0)
+                        probe_results = await probes.probe_batch(sites, detected_target, 20)
+                        found_probes = [r for r in probe_results if r.get("status") == "found"]
+                        probe_total = len(probe_results)
+                elif not run_game_only:
+                    # 默认深度搜索：top 100 站点，并发 15
+                    await progress_queue.put({"message": "📋 深度探测 top 100 站点（并发 15）...", "done": False})
+                    sites = maigret_sites.get_top_sites(100)
+                    probe_results = await probes.probe_batch(sites, detected_target, 15)
                     found_probes = [r for r in probe_results if r.get("status") == "found"]
                     probe_total = len(probe_results)
-                    await progress_queue.put({"message": f"✅ Maigret 探测完成，发现 {len(found_probes)} 个命中", "done": False})
-            elif not run_game_only:
-                await progress_queue.put({"message": "📋 探测 top 30 站点...", "done": False})
-                # 默认 top 30 站点
-                sites = maigret_sites.get_top_sites(30)
-                probe_results = await probes.probe_batch(sites, detected_target, 10)
-                found_probes = [r for r in probe_results if r.get("status") == "found"]
-                probe_total = len(probe_results)
+                await progress_queue.put({"message": f"✅ Maigret 探测完成，发现 {len(found_probes)} 个命中", "done": False})
 
-            # 3. 游戏平台探测
-            if not run_full_search or run_game_only:
+            async def _do_game_probe():
+                """游戏平台探测"""
+                nonlocal game_found, game_total
                 await progress_queue.put({"message": "🎮 探测 15 个游戏平台...", "done": False})
                 game_results = await probes.probe_game_platforms(detected_target)
                 game_found = [r for r in game_results if r.get("status") == "found"]
                 game_total = len(game_results)
+                await progress_queue.put({"message": f"✅ 游戏平台探测完成，发现 {len(game_found)} 个命中", "done": False})
 
-            # 4. 深度分析（使用推理模式）
+            # 并发执行三个探测任务（Grok + Maigret + 游戏平台同时跑）
+            if run_game_only:
+                # 只搜游戏平台
+                await _do_game_probe()
+            else:
+                # 默认：三个任务并发
+                tasks = [_do_grok_search(), _do_maigret_probe(), _do_game_probe()]
+                await _asyncio.gather(*tasks)
+
+            # 深度分析
             if run_deep_analysis:
                 await progress_queue.put({"message": "🧠 启动深度分析...", "done": False})
                 all_findings = found_probes + game_found
                 if grok_result and grok_result.get("platforms"):
                     all_findings.extend(grok_result["platforms"])
-                deep_analysis = ai_analyzer.grok_deep_analysis(detected_target, all_findings)
+                loop = _asyncio.get_event_loop()
+                deep_analysis = await loop.run_in_executor(None, ai_analyzer.grok_deep_analysis, detected_target, all_findings)
 
             # 发送完成进度
             await progress_queue.put({"message": "📊 生成分析报告...", "done": True})
