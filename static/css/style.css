@@ -647,3 +647,38 @@ body::before {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+/* 流式光标 */
+.stream-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 16px;
+  background: var(--accent);
+  vertical-align: text-bottom;
+  animation: blink 0.7s infinite;
+  border-radius: 1px;
+  margin-left: 2px;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* 流式消息状态 */
+.message.ai.streaming {
+  border-left: 2px solid var(--accent);
+  animation: pulse 1.5s infinite;
+}
+
+/* 思考过程 details 样式 */
+.message.ai details summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 12px;
+  user-select: none;
+}
+
+.message.ai details summary:hover {
+  color: var(--accent);
+}

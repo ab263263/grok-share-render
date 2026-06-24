@@ -6,6 +6,11 @@ const STORAGE_KEY = 'osint_history';
 let history = [];
 let welcomeRemoved = false;
 
+// HTML 转义
+function escapeHtml(s) {
+  return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 // 加载历史记录
 function loadHistory() {
   const saved = localStorage.getItem(STORAGE_KEY);
@@ -247,45 +252,121 @@ async function sendMessage() {
   };
 
   try {
-    const response = await fetch(`${API_BASE}/api/chat`, {
+    // 创建 AI 回复占位（流式填充）
+    const aiDiv = document.createElement('div');
+    aiDiv.className = 'message ai streaming';
+    aiDiv.innerHTML = '<span class="stream-cursor"></span>';
+    chat.appendChild(aiDiv);
+
+    let accText = '';
+    let accReasoning = '';
+    let osintData = null;
+
+    // 用 fetch + ReadableStream 消费 SSE（支持 POST）
+    const response = await fetch(`${API_BASE}/api/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: message, target: target, history: history.slice(-5), task_id: taskId })
     });
 
-    const data = await response.json();
-    // 不再立即移除 thinkingDiv，保留思考过程显示
+    const reader = response.body.getReader();
+    const dec = new TextDecoder();
+    let sseBuf = '';
+    let lastFlush = 0;
 
-    if (data.reply) {
-      addMessage(data.reply, 'ai');
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      sseBuf += dec.decode(value, { stream: true });
+
+      // 解析 SSE 事件
+      const blocks = sseBuf.split('\n\n');
+      sseBuf = blocks.pop(); // 保留最后不完整的块
+
+      for (const block of blocks) {
+        const lines = block.split('\n');
+        let eventType = 'message';
+        let eventData = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) eventType = line.slice(7).trim();
+          else if (line.startsWith('data: ')) eventData = line.slice(6);
+        }
+        if (!eventData) continue;
+
+        try {
+          const data = JSON.parse(eventData);
+
+          if (eventType === 'token') {
+            accText += data.text;
+          } else if (eventType === 'reasoning') {
+            accReasoning += data.text;
+          } else if (eventType === 'osint') {
+            osintData = data;
+          } else if (eventType === 'error') {
+            accText += `\n\n⚠️ 错误: ${data.text}`;
+          } else if (eventType === 'done') {
+            // 流结束
+          }
+        } catch (e) {}
+
+        // 节流刷新 UI（每 50ms）
+        const now = Date.now();
+        if (now - lastFlush > 50 || eventType === 'done') {
+          let html = '';
+          if (accReasoning) {
+            html += `<details style="margin-bottom:8px;font-size:12px;color:var(--text-secondary)"><summary>💭 思考过程 (${accReasoning.length} 字)</summary><div style="margin-top:6px;white-space:pre-wrap;max-height:200px;overflow-y:auto;color:var(--text-muted)">${escapeHtml(accReasoning)}</div></details>`;
+          }
+          if (accText) {
+            html += formatMarkdown(accText);
+          }
+          if (!accText && !accReasoning) {
+            html = '<span class="stream-cursor"></span>';
+          } else {
+            html += '<span class="stream-cursor"></span>';
+          }
+          aiDiv.innerHTML = html;
+          chat.scrollTop = chat.scrollHeight;
+          lastFlush = now;
+        }
+      }
+    }
+
+    // 最终渲染（去掉光标）
+    let finalHtml = '';
+    if (accReasoning) {
+      finalHtml += `<details style="margin-bottom:8px;font-size:12px;color:var(--text-secondary)"><summary>💭 思考过程 (${accReasoning.length} 字)</summary><div style="margin-top:6px;white-space:pre-wrap;max-height:200px;overflow-y:auto;color:var(--text-muted)">${escapeHtml(accReasoning)}</div></details>`;
+    }
+    finalHtml += formatMarkdown(accText);
+    aiDiv.innerHTML = finalHtml;
+    aiDiv.classList.remove('streaming');
+    chat.scrollTop = chat.scrollHeight;
+
+    // 保存到历史
+    if (accText) {
       history.push({ role: 'user', content: message });
-      history.push({ role: 'assistant', content: data.reply });
+      history.push({ role: 'assistant', content: accText });
       saveHistory();
     }
 
-    if (data.osint_results) {
-      const osint = data.osint_results;
-      if (osint.error) {
-        addMessage(`⚠️ 情报收集出错: ${osint.error}`, 'system');
-      } else {
-        const grokPlatforms = osint.grok_search?.platforms || [];
-        const maigretFound = osint.maigret_found || [];
-        const gameFound = osint.game_found || [];
+    // 处理 OSINT 结果
+    if (osintData && !osintData.error) {
+      const grokPlatforms = osintData.grok_search?.platforms || [];
+      const maigretFound = osintData.maigret_found || [];
+      const gameFound = osintData.game_found || [];
 
-        const allFindings = [
-          ...grokPlatforms.map(p => ({ platform: 'Grok: ' + (p.platform || '?'), url: p.url, snippet: p.snippet })),
-          ...maigretFound.map(f => ({ platform: f.platform, url: f.url, snippet: f.snippet })),
-          ...gameFound.map(f => ({ platform: '🎮 ' + f.platform, url: f.url, snippet: f.snippet }))
-        ];
+      const allFindings = [
+        ...grokPlatforms.map(p => ({ platform: 'Grok: ' + (p.platform || '?'), url: p.url, snippet: p.snippet })),
+        ...maigretFound.map(f => ({ platform: f.platform, url: f.url, snippet: f.snippet })),
+        ...gameFound.map(f => ({ platform: '🎮 ' + f.platform, url: f.url, snippet: f.snippet }))
+      ];
 
-        if (allFindings.length > 0) addFindings(allFindings);
+      if (allFindings.length > 0) addFindings(allFindings);
 
-        const personalInfo = osint.grok_search?.personal_info || {};
-        if (Object.keys(personalInfo).length > 0) addPersonalInfo(personalInfo);
+      const personalInfo = osintData.grok_search?.personal_info || {};
+      if (Object.keys(personalInfo).length > 0) addPersonalInfo(personalInfo);
 
-        const deepAnalysis = osint.deep_analysis || '';
-        if (deepAnalysis) addMessage(deepAnalysis, 'ai');
-      }
+      const deepAnalysis = osintData.deep_analysis || '';
+      if (deepAnalysis) addMessage(deepAnalysis, 'ai');
     }
 
     statusText.textContent = '就绪';

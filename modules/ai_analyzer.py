@@ -70,6 +70,64 @@ def call_grok(messages: list[dict], model: str = MODEL_DEEP, temperature: float 
         return ""
 
 
+async def call_grok_stream(messages: list[dict], model: str = MODEL_DEEP, temperature: float = 0.7, timeout: float = 120.0):
+    """流式调用 Grok API，逐 token yield 输出。
+
+    用法:
+        async for token in call_grok_stream(messages):
+            print(token, end='')
+
+    yield 的每个值是一个 dict:
+        {"type": "content", "text": "..."}     — 正文内容
+        {"type": "reasoning", "text": "..."}   — 思考链（如果模型支持）
+        {"type": "done"}                        — 流结束
+        {"type": "error", "text": "..."}        — 错误
+    """
+    headers = {
+        "Authorization": f"Bearer {GROK_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": 4000,
+        "stream": True,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream("POST", GROK_ENDPOINT, headers=headers, json=payload) as resp:
+                resp.raise_for_status()
+                buf = ""
+                async for chunk in resp.aiter_text():
+                    buf += chunk
+                    lines = buf.split("\n")
+                    buf = lines.pop()  # 保留最后不完整的一行
+                    for line in lines:
+                        line = line.strip()
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data_str = line[5:].strip()
+                        if data_str == "[DONE]":
+                            yield {"type": "done"}
+                            return
+                        try:
+                            data = json.loads(data_str)
+                            delta = data.get("choices", [{}])[0].get("delta", {})
+                            content = delta.get("content", "")
+                            reasoning = delta.get("reasoning_content", "") or delta.get("reasoning", "")
+                            if reasoning:
+                                yield {"type": "reasoning", "text": reasoning}
+                            if content:
+                                yield {"type": "content", "text": content}
+                        except Exception:
+                            continue
+                yield {"type": "done"}
+    except Exception as e:
+        print(f"[call_grok_stream] 流式调用失败: {e}")
+        yield {"type": "error", "text": str(e)}
+
+
 async def call_grok_async(messages: list[dict], model: str = MODEL_DEEP, temperature: float = 0.7, timeout: float = 120.0) -> str:
     """通用 Grok API 调用函数（异步版本）。
 
