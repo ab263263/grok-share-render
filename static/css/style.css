@@ -202,6 +202,15 @@ body::before {
   padding: 4px 12px;
 }
 
+.message.system {
+  background: rgba(79, 172, 254, 0.08);
+  border: 1px solid rgba(79, 172, 254, 0.2);
+  border-radius: 8px;
+  color: var(--accent);
+  padding: 6px 14px;
+  font-size: 12px;
+}
+
 /* 情报发现卡片 */
 .findings {
   align-self: flex-start;
@@ -316,6 +325,69 @@ body::before {
   background: rgba(26, 26, 46, 0.8);
   backdrop-filter: blur(20px);
   border-top: 1px solid var(--border);
+}
+
+/* 工具栏：用户名输入 + 模式选择 */
+.toolbar {
+  display: flex;
+  gap: 12px;
+  max-width: 900px;
+  margin: 0 auto 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.target-input {
+  flex: 0 0 220px;
+  padding: 10px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.target-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(79, 172, 254, 0.1);
+}
+
+.target-input::placeholder { color: var(--text-muted); }
+
+.mode-buttons {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.mode-btn {
+  padding: 8px 14px;
+  background: var(--bg-message);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.mode-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(79, 172, 254, 0.05);
+}
+
+.mode-btn.active {
+  background: var(--gradient-2);
+  color: #000;
+  border-color: transparent;
+  font-weight: 600;
+  box-shadow: 0 0 12px rgba(79, 172, 254, 0.3);
 }
 
 .input-wrapper {

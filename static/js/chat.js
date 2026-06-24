@@ -143,16 +143,60 @@ function sendSuggestion(text) {
   sendMessage();
 }
 
+// 当前选择的模式
+let currentMode = 'default';
+
+// 设置模式
+function setMode(btn) {
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentMode = btn.dataset.mode;
+  console.log('切换到模式:', currentMode);
+}
+
 // 发送消息
 async function sendMessage() {
   const input = document.getElementById('input');
+  const targetInput = document.getElementById('target-input');
   const sendBtn = document.getElementById('send-btn');
   const statusText = document.getElementById('status-text');
   const chat = document.getElementById('chat-mode');
 
-  const message = input.value.trim();
-  if (!message) return;
+  // 优先使用 target-input，否则从 input 解析
+  let target = targetInput ? targetInput.value.trim() : '';
+  let rawMessage = input.value.trim();
 
+  // 如果没填 target-input，尝试从 input 中提取 @xxx 或 xxx
+  if (!target && rawMessage) {
+    const atMatch = rawMessage.match(/@(\w{3,30})/);
+    if (atMatch) {
+      target = atMatch[1];
+    } else {
+      // 提取第一个连续单词作为目标
+      const cmdMatch = rawMessage.match(/(?:搜索|查找|调查|查一下|search|find|lookup)\s+[@]?(\w+)/i);
+      if (cmdMatch) {
+        target = cmdMatch[1];
+      }
+    }
+  }
+
+  if (!target) {
+    addMessage('⚠️ 请先在上方输入用户名', 'system');
+    if (targetInput) targetInput.focus();
+    return;
+  }
+
+  // 根据当前模式构造消息（覆盖或附加模式关键词）
+  let modeHint = '';
+  if (currentMode === 'full') modeHint = '全站搜索';
+  else if (currentMode === 'game') modeHint = '搜索游戏平台';
+  else if (currentMode === 'deep') modeHint = '深度分析';
+
+  const message = rawMessage
+    ? (modeHint ? `${modeHint} ${target}，${rawMessage}` : `搜索 ${target}，${rawMessage}`)
+    : `${modeHint || '搜索'} ${target}`;
+
+  addMessage(`🎯 目标: ${target} | 模式: ${currentMode}`, 'system');
   addMessage(message, 'user');
   input.value = '';
   sendBtn.disabled = true;
@@ -206,7 +250,7 @@ async function sendMessage() {
     const response = await fetch(`${API_BASE}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: message, history: history.slice(-5), task_id: taskId })
+      body: JSON.stringify({ message: message, target: target, history: history.slice(-5), task_id: taskId })
     });
 
     const data = await response.json();

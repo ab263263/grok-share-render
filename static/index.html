@@ -53,8 +53,18 @@
 </div>
 
 <div class="input-area" id="input-area" style="display:none;">
+  <!-- 功能选择工具栏 -->
+  <div class="toolbar">
+    <input type="text" id="target-input" class="target-input" placeholder="输入用户名（必填）" />
+    <div class="mode-buttons">
+      <button class="mode-btn active" data-mode="default" onclick="setMode(this)" title="Grok + 100 站点 + 15 游戏平台（并发）">⚡ 深度搜索</button>
+      <button class="mode-btn" data-mode="full" onclick="setMode(this)" title="Grok + 1836 全站 + 15 游戏平台">📋 全站搜索</button>
+      <button class="mode-btn" data-mode="game" onclick="setMode(this)" title="仅 15 游戏平台">🎮 游戏平台</button>
+      <button class="mode-btn" data-mode="deep" onclick="setMode(this)" title="深度搜索 + AI 深度推理分析">🧠 深度分析</button>
+    </div>
+  </div>
   <div class="input-wrapper">
-    <input type="text" id="input" placeholder="输入指令，例如：搜索 johnsmith、全站搜索 testuser、深度分析 alex_dev" onkeypress="if(event.key==='Enter')sendMessage()">
+    <input type="text" id="input" placeholder="补充指令（可选），如：全站搜索、深度分析" onkeypress="if(event.key==='Enter')sendMessage()">
     <button id="send-btn" onclick="sendMessage()">发送</button>
   </div>
 </div>
