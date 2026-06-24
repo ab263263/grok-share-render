@@ -212,7 +212,9 @@ async def chat(req: ChatRequest):
 
             # 1. Grok 实时搜索（除非只搜游戏平台）
             if run_grok_search:
-                grok_result = ai_analyzer.grok_search(detected_target)
+                # 提供 top 50 站点列表给 Grok，提高搜索覆盖率
+                grok_sites = maigret_sites.get_top_sites(50)
+                grok_result = ai_analyzer.grok_search(detected_target, sites=grok_sites)
 
             # 2. Maigret 探测
             if run_full_search:

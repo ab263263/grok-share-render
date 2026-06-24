@@ -68,7 +68,7 @@ def call_grok(messages: list[dict], model: str = MODEL_DEEP, temperature: float 
         return ""
 
 
-def grok_search(target: str) -> dict:
+def grok_search(target: str, sites: list = None) -> dict:
     """利用 Grok 的实时搜索能力搜索目标用户名。
 
     Grok 会自动搜索互联网，访问网站，爬取网页内容，
@@ -76,6 +76,7 @@ def grok_search(target: str) -> dict:
 
     Args:
         target: 目标用户名
+        sites: 可选的站点列表，提供给 Grok 让它搜索这些平台
 
     Returns:
         {
@@ -85,28 +86,43 @@ def grok_search(target: str) -> dict:
             "raw": "原始回复"
         }
     """
-    messages = [
-        {
-            "role": "user",
-            "content": (
-                f"Search the web for the username '{target}'. "
-                f"Find ALL platforms where this username has an account. "
-                f"Check GitHub, Reddit, Twitter/X, Instagram, Facebook, TikTok, "
-                f"YouTube, Twitch, Discord, Steam, Pinterest, LinkedIn, Tumblr, "
-                f"DeviantArt, Flickr, SoundCloud, Spotify, Medium, Patreon, etc.\n\n"
-                f"For each platform found:\n"
-                f"1. Provide the profile URL\n"
-                f"2. Extract any personal information (real name, bio, location, email, age)\n"
-                f"3. Note the account creation date if visible\n"
-                f"4. Note follower/following counts if visible\n\n"
-                f"Also search for any leaked data, breach records, or public records "
-                f"associated with this username. Search X/Twitter for posts mentioning "
-                f"this username.\n\n"
-                f"Finally, provide a comprehensive summary of everything you found, "
-                f"including a risk assessment and recommended next steps for investigation."
-            ),
-        }
-    ]
+    # 构建搜索 prompt
+    base_prompt = (
+        f"Search the web for the username '{target}'. "
+        f"Find ALL platforms where this username has an account. "
+    )
+
+    if sites:
+        # 提供站点列表给 Grok
+        site_list = "\n".join(
+            f"- {s.get('name', '?')}: {s.get('url', '').replace('{username}', target)}"
+            for s in sites[:50]  # 最多 50 个站点
+        )
+        base_prompt += (
+            f"Please check the following platforms specifically:\n{site_list}\n\n"
+            f"For each platform, visit the URL and check if the profile exists. "
+        )
+    else:
+        base_prompt += (
+            f"Check GitHub, Reddit, Twitter/X, Instagram, Facebook, TikTok, "
+            f"YouTube, Twitch, Discord, Steam, Pinterest, LinkedIn, Tumblr, "
+            f"DeviantArt, Flickr, SoundCloud, Spotify, Medium, Patreon, etc. "
+        )
+
+    base_prompt += (
+        f"\nFor each platform found:\n"
+        f"1. Provide the profile URL\n"
+        f"2. Extract any personal information (real name, bio, location, email, age)\n"
+        f"3. Note the account creation date if visible\n"
+        f"4. Note follower/following counts if visible\n\n"
+        f"Also search for any leaked data, breach records, or public records "
+        f"associated with this username. Search X/Twitter for posts mentioning "
+        f"this username.\n\n"
+        f"Finally, provide a comprehensive summary of everything you found, "
+        f"including a risk assessment and recommended next steps for investigation."
+    )
+
+    messages = [{"role": "user", "content": base_prompt}]
     text = call_grok(messages, model=MODEL_DEEP, temperature=0.7, timeout=180.0)
 
     if not text:
