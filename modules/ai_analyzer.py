@@ -44,7 +44,7 @@ def call_grok(messages: list[dict], model: str = MODEL_DEEP, temperature: float 
         "stream": False,
     }
     try:
-        with httpx.Client(timeout=timeout) as client:
+        with httpx.Client(timeout=timeout, verify=False) as client:
             resp = client.post(GROK_ENDPOINT, headers=headers, json=payload)
             resp.raise_for_status()
             # 尝试 JSON 解析，失败则尝试原始文本
@@ -95,9 +95,14 @@ async def call_grok_stream(messages: list[dict], model: str = MODEL_DEEP, temper
         "stream": True,
     }
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout, verify=False) as client:
             async with client.stream("POST", GROK_ENDPOINT, headers=headers, json=payload) as resp:
-                resp.raise_for_status()
+                if resp.status_code != 200:
+                    err_body = await resp.aread()
+                    err_msg = err_body.decode("utf-8", "ignore")[:300]
+                    print(f"[call_grok_stream] HTTP {resp.status_code}: {err_msg}")
+                    yield {"type": "error", "text": f"Grok API {resp.status_code}: {err_msg}"}
+                    return
                 buf = ""
                 async for chunk in resp.aiter_text():
                     buf += chunk
@@ -152,7 +157,7 @@ async def call_grok_async(messages: list[dict], model: str = MODEL_DEEP, tempera
         "stream": False,
     }
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=timeout, verify=False) as client:
             resp = await client.post(GROK_ENDPOINT, headers=headers, json=payload)
             resp.raise_for_status()
             # 尝试 JSON 解析，失败则尝试原始文本
