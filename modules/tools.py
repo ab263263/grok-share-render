@@ -23,9 +23,9 @@ from modules import ai_analyzer, maigret_sites, probes, variants, search_engines
 TOOLS = [
     {
         "name": "username_probe",
-        "description": "探测用户名在多个平台是否存在（Maigret 站点，默认 top 100）",
+        "description": "探测用户名在多个平台是否存在（Maigret 站点，默认 top 50）",
         "category": "probe",
-        "params": {"username": "str", "limit": "int=100", "concurrency": "int=15"},
+        "params": {"username": "str", "limit": "int=50", "concurrency": "int=20"},
         "keywords": ["探测", "probe", "查找用户名", "检查账号", "搜索", "查找", "调查", "查一下", "search", "find", "lookup"],
     },
     {
@@ -263,8 +263,8 @@ async def execute_tool(
     try:
         if tool_name == "username_probe":
             username = kwargs.get("username") or kwargs.get("target", "")
-            limit = int(kwargs.get("limit", 100))
-            concurrency = int(kwargs.get("concurrency", 15))
+            limit = int(kwargs.get("limit", 50))
+            concurrency = int(kwargs.get("concurrency", 20))
             await progress_queue.put({"message": f"📋 探测 top {limit} 站点（并发 {concurrency}）...", "done": False, "tool": tool_name})
             sites = maigret_sites.get_top_sites(limit)
             results = await probes.probe_batch(sites, username, concurrency)

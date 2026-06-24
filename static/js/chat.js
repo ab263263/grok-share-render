@@ -457,6 +457,7 @@ async function sendMessage() {
     let accText = '';
     let accReasoning = '';
     let osintData = null;
+    let toolHint = '';  // 工具执行中的提示文本
 
     // 用 fetch + ReadableStream 消费 SSE（支持 POST）
     const response = await fetch(`${API_BASE}/api/chat/stream`, {
@@ -494,11 +495,14 @@ async function sendMessage() {
 
           if (eventType === 'token') {
             accText += data.text;
+            toolHint = '';  // 收到 AI 回复，清空工具提示
           } else if (eventType === 'reasoning') {
             accReasoning += data.text;
           } else if (eventType === 'tools') {
             // 工具调用系统：显示工具卡片
             addToolCard(data.tools || [], data.target);
+            // 设置工具执行提示（避免 AI 回复区域空白）
+            toolHint = '⏳ 正在执行工具调用，请稍候...';
           } else if (eventType === 'tool_result') {
             // 工具执行完成：更新状态
             updateToolStatus(data.tool, data.result);
@@ -521,7 +525,10 @@ async function sendMessage() {
           if (accText) {
             html += formatMarkdown(accText);
           }
-          if (!accText && !accReasoning) {
+          if (!accText && !accReasoning && toolHint) {
+            html += `<div style="color:var(--accent-2);font-size:13px;padding:4px 0;">${toolHint}</div>`;
+          }
+          if (!accText && !accReasoning && !toolHint) {
             html = '<span class="stream-cursor"></span>';
           } else {
             html += '<span class="stream-cursor"></span>';
