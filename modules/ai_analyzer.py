@@ -359,7 +359,7 @@ def grok_deep_analysis(target: str, findings: list[dict]) -> str:
             ),
         }
     ]
-    return call_grok(messages, model=MODEL_REASONING, temperature=0.7, timeout=180.0)
+    return call_grok(messages, model=MODEL_DEEP, temperature=0.7, timeout=180.0)
 
 
 def _infer_platform(url: str) -> str:

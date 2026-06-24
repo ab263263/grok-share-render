@@ -167,7 +167,8 @@ async function sendMessage() {
   const stepsDiv = document.getElementById('thinking-steps');
   
   // SSE 实时进度
-  const eventSource = new EventSource(`${API_BASE}/api/progress`);
+  const taskId = 'task-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+  const eventSource = new EventSource(`${API_BASE}/api/progress?task_id=${taskId}`);
   eventSource.onmessage = (event) => {
     const data = JSON.parse(event.data);
     const step = document.createElement('div');
@@ -188,7 +189,7 @@ async function sendMessage() {
     const response = await fetch(`${API_BASE}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: message, history: history.slice(-5) })
+      body: JSON.stringify({ message: message, history: history.slice(-5), task_id: taskId })
     });
     
     const data = await response.json();
