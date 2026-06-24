@@ -18,7 +18,7 @@ import uuid
 import json
 from typing import Dict
 
-from modules import maigret_sites, variants, probes, search_engines, ai_analyzer
+from modules import maigret_sites, variants, probes, search_engines, ai_analyzer, reports
 
 # === 配置 ===
 PORT = int(os.environ.get("PORT", 8000))
@@ -761,6 +761,59 @@ async def run_full_osint(req: RunRequest):
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(500, f"OSINT 流程失败: {str(e)}")
+
+# === 报告导出（从 Maigret/Blackbird 学习）===
+
+class ReportRequest(BaseModel):
+    target: str
+    results: list[dict] = []
+    osint_data: Optional[dict] = None
+
+@app.post("/api/report/html")
+async def export_html_report(req: ReportRequest):
+    """导出 HTML 报告（含 D3.js 关系图谱）"""
+    html = reports.generate_html_report(req.target, req.results, req.osint_data)
+    return HTMLResponse(content=html, headers={"Content-Disposition": f"attachment; filename=osint-report-{req.target}.html"})
+
+@app.post("/api/report/csv")
+async def export_csv_report(req: ReportRequest):
+    """导出 CSV 报告"""
+    csv_content = reports.generate_csv_report(req.target, req.results)
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(content=csv_content, media_type="text/csv",
+                            headers={"Content-Disposition": f"attachment; filename=osint-report-{req.target}.csv"})
+
+@app.post("/api/report/json")
+async def export_json_report(req: ReportRequest):
+    """导出 JSON 报告"""
+    json_content = reports.generate_json_report(req.target, req.results, req.osint_data)
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(content=json_content, media_type="application/json",
+                            headers={"Content-Disposition": f"attachment; filename=osint-report-{req.target}.json"})
+
+# === 递归身份探测（从 Maigret 学习）===
+
+class RecursiveProbeRequest(BaseModel):
+    username: str
+    max_depth: int = 2
+    limit: int = 50
+    concurrency: int = 10
+
+@app.post("/api/recursive-probe")
+async def recursive_probe_api(req: RecursiveProbeRequest):
+    """递归身份挖掘：探测到账号后提取关联用户名，自动二次搜索"""
+    sites = maigret_sites.get_top_sites(req.limit)
+
+    result = await probes.recursive_probe(
+        req.username, sites, req.max_depth, req.concurrency
+    )
+
+    # 为每个结果添加置信度和元数据
+    for r in result.get("original", []):
+        r["confidence"] = probes.calculate_confidence(r)
+        r["metadata"] = probes.extract_metadata(r)
+
+    return result
 
 # === 静态文件服务（前端）===
 if os.path.isdir(STATIC_DIR):

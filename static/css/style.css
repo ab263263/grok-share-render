@@ -317,6 +317,69 @@ body::before {
 
 .personal-info-item strong { color: var(--text-primary); }
 
+/* 报告导出按钮（从 Maigret 学习） */
+.report-buttons {
+  max-width: 900px;
+  margin: 16px auto;
+  padding: 16px 20px;
+  background: var(--bg-message);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.report-header {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+.report-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.report-btn {
+  padding: 8px 16px;
+  background: var(--gradient-2);
+  color: #000;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.report-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(79, 172, 254, 0.3);
+}
+
+/* D3.js 关系图谱容器（从 Maigret 学习） */
+.graph-container {
+  max-width: 900px;
+  margin: 16px auto;
+  background: var(--bg-message);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.graph-header {
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.graph-svg {
+  width: 100%;
+  min-height: 350px;
+}
+
 /* 输入区域 */
 .input-area {
   position: relative;

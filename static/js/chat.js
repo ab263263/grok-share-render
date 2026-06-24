@@ -141,6 +141,129 @@ function addPersonalInfo(info) {
   chat.scrollTop = chat.scrollHeight;
 }
 
+// === 从 Maigret/OpenOSINT 学习：报告导出 + 关系图谱 ===
+
+// 添加报告导出按钮
+function addReportButtons(target, results, osintData) {
+  const chat = document.getElementById('chat-mode');
+  const div = document.createElement('div');
+  div.className = 'report-buttons';
+
+  const foundCount = (results || []).filter(r => r.status === 'found').length;
+  if (foundCount === 0) return;
+
+  div.innerHTML = `
+    <div class="report-header">📄 报告导出 (${foundCount} 个命中)</div>
+    <div class="report-actions">
+      <button class="report-btn" onclick="exportReport('html', '${target}')">🌐 HTML 报告</button>
+      <button class="report-btn" onclick="exportReport('csv', '${target}')">📊 CSV 报告</button>
+      <button class="report-btn" onclick="exportReport('json', '${target}')">📋 JSON 报告</button>
+    </div>
+  `;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+
+  // 保存当前结果供导出使用
+  window._lastReportData = { target, results: results || [], osintData: osintData || {} };
+}
+
+// 导出报告
+async function exportReport(format, target) {
+  const data = window._lastReportData;
+  if (!data) {
+    addMessage('⚠️ 没有可导出的数据', 'system');
+    return;
+  }
+
+  const statusText = document.getElementById('status-text');
+  statusText.textContent = `生成 ${format.toUpperCase()} 报告...`;
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/report/${format}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        target: data.target,
+        results: data.results,
+        osint_data: data.osintData
+      })
+    });
+
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `osint-report-${target}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    statusText.textContent = `${format.toUpperCase()} 报告已下载`;
+  } catch (e) {
+    addMessage(`❌ 导出失败: ${e.message}`, 'system');
+    statusText.textContent = '导出失败';
+  }
+}
+
+// 显示 D3.js 关系图谱
+function showGraph(graphData) {
+  if (!graphData || !graphData.nodes || graphData.nodes.length === 0) return;
+
+  const chat = document.getElementById('chat-mode');
+  const container = document.createElement('div');
+  container.className = 'graph-container';
+  container.innerHTML = '<div class="graph-header">🕸️ 关系图谱</div><div class="graph-svg" id="graph-' + Date.now() + '"></div>';
+  chat.appendChild(container);
+
+  const graphId = container.querySelector('.graph-svg').id;
+  const el = document.getElementById(graphId);
+
+  const width = el.clientWidth || 600;
+  const height = 350;
+
+  const svg = d3.select('#' + graphId).append('svg')
+    .attr('width', width).attr('height', height)
+    .style('background', '#0d1117').style('border-radius', '8px');
+
+  const sim = d3.forceSimulation(graphData.nodes)
+    .force('link', d3.forceLink(graphData.links).id(d => d.id).distance(80))
+    .force('charge', d3.forceManyBody().strength(-200))
+    .force('center', d3.forceCenter(width / 2, height / 2));
+
+  const colors = { root: '#f093fb', account: '#4facfe', related: '#fbbf24' };
+
+  const link = svg.selectAll('line').data(graphData.links).join('line')
+    .attr('stroke', '#333').attr('stroke-width', 1.5);
+
+  const node = svg.selectAll('circle').data(graphData.nodes).join('circle')
+    .attr('r', d => d.type === 'root' ? 14 : 8)
+    .attr('fill', d => colors[d.type] || '#666')
+    .style('cursor', 'pointer')
+    .call(d3.drag()
+      .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+      .on('end', (e, d) => { d.fx = null; d.fy = null; })
+    );
+
+  node.append('title').text(d => d.id);
+
+  const label = svg.selectAll('text').data(graphData.nodes).join('text')
+    .text(d => d.id.split('@')[0].substring(0, 15))
+    .attr('font-size', 10).attr('fill', '#aaa').attr('dx', 12).attr('dy', 4);
+
+  sim.on('tick', () => {
+    link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    node.attr('cx', d => d.x).attr('cy', d => d.y);
+    label.attr('x', d => d.x).attr('y', d => d.y);
+  });
+
+  chat.scrollTop = chat.scrollHeight;
+}
+
 // 发送建议
 function sendSuggestion(text) {
   const input = document.getElementById('input');
@@ -367,6 +490,12 @@ async function sendMessage() {
 
       const deepAnalysis = osintData.deep_analysis || '';
       if (deepAnalysis) addMessage(deepAnalysis, 'ai');
+
+      // 添加报告导出按钮（从 Maigret 学习）
+      addReportButtons(target, allFindings, osintData);
+
+      // 显示 D3.js 关系图谱（从 Maigret 学习）
+      if (osintData.graph) showGraph(osintData.graph);
     }
 
     statusText.textContent = '就绪';

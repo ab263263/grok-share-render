@@ -677,3 +677,248 @@ async def probe_batch(
     tasks = [_run(site) for site in sites]
     results = await asyncio.gather(*tasks, return_exceptions=False)
     return list(results)
+
+
+# ==================== 从 Maigret 学习：递归身份挖掘 ====================
+
+def extract_related_usernames(html: str, current_username: str) -> list:
+    """从页面 HTML 中提取关联用户名/ID（Maigret 递归搜索核心）。
+
+    提取策略：
+    1. og:url / canonical 链接中的用户名
+    2. 页面中的 @username 提及
+    3. 社交媒体链接（twitter.com/xxx, instagram.com/xxx 等）
+    4. data-username 属性
+    """
+    related = set()
+    current_lower = (current_username or "").lower()
+
+    # 1. 提取社交媒体链接中的用户名
+    social_patterns = [
+        r'(?:twitter\.com|x\.com)/([A-Za-z0-9_]{3,20})(?:/|\?|$)',
+        r'instagram\.com/([A-Za-z0-9_.]{3,30})(?:/|\?|$)',
+        r'github\.com/([A-Za-z0-9_-]{2,39})(?:/|\?|$)',
+        r'reddit\.com/u(?:ser)?/([A-Za-z0-9_-]{3,20})(?:/|\?|$)',
+        r'twitch\.tv/([A-Za-z0-9_]{3,25})(?:/|\?|$)',
+        r'youtube\.com/(?:c|hannel|user)/([A-Za-z0-9_-]{3,40})(?:/|\?|$)',
+        r'tiktok\.com/@([A-Za-z0-9_.]{3,24})(?:/|\?|$)',
+        r'facebook\.com/([A-Za-z0-9.]{5,50})(?:/|\?|$)',
+        r'linkedin\.com/in/([A-Za-z0-9_-]{3,100})(?:/|\?|$)',
+        r't.me/([A-Za-z0-9_]{3,32})(?:/|\?|$)',
+        r'discord\.gg/([A-Za-z0-9]{3,100})',
+    ]
+    for pat in social_patterns:
+        for m in re.finditer(pat, html or "", re.IGNORECASE):
+            uname = m.group(1)
+            if uname.lower() not in ("p", "home", "search", "login", "signup", "register", "watch", "videos", "photos", "posts", current_lower):
+                related.add(uname)
+
+    # 2. 提取 @username 提及
+    for m in re.finditer(r'(?:^|\s)@([A-Za-z0-9_]{3,20})', html or ""):
+        uname = m.group(1)
+        if uname.lower() != current_lower:
+            related.add(uname)
+
+    # 3. 限制数量，避免过多噪音
+    return list(related)[:10]
+
+
+def extract_metadata(result: dict) -> dict:
+    """从探测结果中提取用户元数据（Blackbird 风格）。
+
+    提取：头像、bio、位置、关注数、粉丝数、账号创建时间等。
+    """
+    metadata = {}
+    extra = result.get("extra") or {}
+    snippet = result.get("snippet") or ""
+
+    # 头像
+    avatar = extra.get("og_image") or extra.get("avatar_url") or extra.get("profile_image_url")
+    if avatar:
+        metadata["avatar"] = avatar
+
+    # bio
+    bio = extra.get("bio") or extra.get("biography")
+    if not bio:
+        m = re.search(r'(?:Bio|biography|Description)[:\s]+(.+?)(?:\||$)', snippet, re.I)
+        bio = m.group(1).strip() if m else ""
+    if bio:
+        metadata["bio"] = bio[:200]
+
+    # 位置
+    location = extra.get("location") or extra.get("city") or extra.get("country")
+    if not location:
+        m = re.search(r'(?:Location|位置|地点|Based in)[:\s]+(.+?)(?:\||$)', snippet, re.I)
+        location = m.group(1).strip() if m else ""
+    if location:
+        metadata["location"] = location[:100]
+
+    # 关注数/粉丝数
+    followers = extra.get("followers") or extra.get("follower_count")
+    if not followers:
+        m = re.search(r'(?:Followers|粉丝|followers)[:\s]+([\d,]+)', snippet, re.I)
+        followers = m.group(1) if m else ""
+    if followers:
+        metadata["followers"] = str(followers)
+
+    following = extra.get("following") or extra.get("following_count")
+    if not following:
+        m = re.search(r'(?:Following|关注|following)[:\s]+([\d,]+)', snippet, re.I)
+        following = m.group(1) if m else ""
+    if following:
+        metadata["following"] = str(following)
+
+    # 账号创建时间
+    created = extra.get("created_at") or extra.get("created") or extra.get("join_date")
+    if not created:
+        m = re.search(r'(?:Created|创建|Joined|注册)[:\s]+(\d{4}[-/]\d{2}[-/]\d{2})', snippet, re.I)
+        created = m.group(1) if m else ""
+    if created:
+        metadata["created"] = created
+
+    # 真实姓名
+    name = extra.get("name") or extra.get("real_name") or extra.get("display_name")
+    if not name:
+        m = re.search(r'(?:Name|名称|姓名)[:\s]+(.+?)(?:\||$)', snippet, re.I)
+        name = m.group(1).strip() if m else ""
+    if name:
+        metadata["name"] = name[:100]
+
+    # 邮箱（从 bio 或 snippet 中提取）
+    emails = re.findall(r'[\w.+-]+@[\w-]+\.[\w.-]+', snippet + " " + (bio or ""))
+    if emails:
+        metadata["emails"] = list(set(emails))[:3]
+
+    return metadata
+
+
+def calculate_confidence(result: dict) -> int:
+    """计算探测结果的置信度评分（Social Analyzer 风格，0-100）。
+
+    评分依据：
+    - 状态码 200 且有 presence 指标验证: +40
+    - 有 og:image / 头像: +20
+    - 有 bio / snippet: +15
+    - 有 followers 数据: +10
+    - URL 可访问（非 404/410）: +15
+    """
+    if result.get("status") != "found":
+        return 0
+
+    score = 0
+
+    # presence 指标验证
+    if result.get("verified"):
+        score += 40
+
+    # 有 snippet
+    snippet = result.get("snippet") or ""
+    if snippet:
+        score += 15
+
+    # extra 中有元数据
+    extra = result.get("extra") or {}
+    if extra.get("og_image") or extra.get("avatar_url"):
+        score += 20
+    if extra.get("followers") or extra.get("follower_count"):
+        score += 10
+
+    # URL 存在
+    if result.get("url"):
+        score += 15
+
+    return min(score, 100)
+
+
+async def recursive_probe(
+    username: str,
+    sites: list,
+    max_depth: int = 2,
+    concurrency: int = 10,
+    progress_callback=None,
+) -> dict:
+    """递归身份挖掘（Maigret 核心功能）。
+
+    探测到账号后，从页面中提取关联用户名，自动二次搜索。
+
+    Args:
+        username: 初始目标用户名
+        sites: 站点列表
+        max_depth: 递归深度（默认 2 层）
+        concurrency: 并发数
+        progress_callback: async callback(current, total, message)
+
+    Returns:
+        {
+            "original": [原始探测结果],
+            "related": [{"username": "xxx", "source": "GitHub", "results": [...]}],
+            "graph": {"nodes": [...], "links": [...]},  # 关系图谱数据
+        }
+    """
+    visited = {username.lower()}
+    all_results = []
+    related_findings = []
+    graph_nodes = [{"id": username, "type": "root", "platform": "target"}]
+    graph_links = []
+
+    # 第一轮探测
+    if progress_callback:
+        await progress_callback(0, max_depth, f"🔍 递归探测第 1 轮: {username}")
+
+    results = await probe_batch(sites, username, concurrency)
+    found = [r for r in results if r.get("status") == "found"]
+    all_results.extend(found)
+
+    # 提取关联用户名
+    for r in found:
+        platform = r.get("platform", "?")
+        graph_nodes.append({"id": f"{username}@{platform}", "type": "account", "platform": platform, "url": r.get("url", "")})
+        graph_links.append({"source": username, "target": f"{username}@{platform}"})
+
+        # 从 extra 中获取 HTML（如果有）
+        extra = r.get("extra") or {}
+        html = extra.get("html") or extra.get("raw_html") or ""
+        if not html:
+            # 从 snippet 中提取
+            html = r.get("snippet") or ""
+
+        related = extract_related_usernames(html, username)
+        for rel_user in related:
+            if rel_user.lower() not in visited:
+                visited.add(rel_user.lower())
+                graph_nodes.append({"id": rel_user, "type": "related", "source": platform})
+                graph_links.append({"source": f"{username}@{platform}", "target": rel_user, "type": "mentions"})
+
+    # 递归探测关联用户名
+    for depth in range(2, max_depth + 1):
+        new_users = [n["id"] for n in graph_nodes if n.get("type") == "related" and n["id"] not in visited]
+        if not new_users:
+            break
+
+        for rel_user in new_users[:5]:  # 每轮最多探测 5 个关联用户
+            visited.add(rel_user.lower())
+            if progress_callback:
+                await progress_callback(depth - 1, max_depth, f"🔍 递归探测第 {depth} 轮: {rel_user}")
+
+            rel_results = await probe_batch(sites[:20], rel_user, concurrency)  # 关联用户只探测 top 20
+            rel_found = [r for r in rel_results if r.get("status") == "found"]
+
+            if rel_found:
+                related_findings.append({
+                    "username": rel_user,
+                    "source": "recursive",
+                    "results": rel_found,
+                })
+                for r in rel_found:
+                    platform = r.get("platform", "?")
+                    graph_nodes.append({"id": f"{rel_user}@{platform}", "type": "account", "platform": platform})
+                    graph_links.append({"source": rel_user, "target": f"{rel_user}@{platform}"})
+
+    if progress_callback:
+        await progress_callback(max_depth, max_depth, f"✅ 递归探测完成: {len(all_results)} 个直接命中, {len(related_findings)} 个关联用户")
+
+    return {
+        "original": all_results,
+        "related": related_findings,
+        "graph": {"nodes": graph_nodes, "links": graph_links},
+    }
