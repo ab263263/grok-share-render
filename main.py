@@ -210,20 +210,32 @@ async def chat(req: ChatRequest):
             game_total = 0
             deep_analysis = ""
 
+            # 发送进度
+            for q in progress_store.values():
+                await q.put({"message": "📝 解析指令...", "done": False})
+
             # 1. Grok 实时搜索（除非只搜游戏平台）
             if run_grok_search:
+                for q in progress_store.values():
+                    await q.put({"message": "🔍 启动 Grok 实时搜索...", "done": False})
                 # 提供 top 50 站点列表给 Grok，提高搜索覆盖率
                 grok_sites = maigret_sites.get_top_sites(50)
                 grok_result = ai_analyzer.grok_search(detected_target, sites=grok_sites)
 
             # 2. Maigret 探测
             if run_full_search:
+                for q in progress_store.values():
+                    await q.put({"message": "📋 全站搜索 1836 个站点...", "done": False})
                 # 全站搜索（1836 站点）
                 sites = maigret_sites.get_top_sites(0)  # 0 = 全部
                 probe_results = await probes.probe_batch(sites, detected_target, 20)
                 found_probes = [r for r in probe_results if r.get("status") == "found"]
                 probe_total = len(probe_results)
+                for q in progress_store.values():
+                    await q.put({"message": f"✅ Maigret 探测完成，发现 {len(found_probes)} 个命中", "done": False})
             elif not run_game_only:
+                for q in progress_store.values():
+                    await q.put({"message": "📋 探测 top 30 站点...", "done": False})
                 # 默认 top 30 站点
                 sites = maigret_sites.get_top_sites(30)
                 probe_results = await probes.probe_batch(sites, detected_target, 10)
@@ -232,16 +244,24 @@ async def chat(req: ChatRequest):
 
             # 3. 游戏平台探测
             if not run_full_search or run_game_only:
+                for q in progress_store.values():
+                    await q.put({"message": "🎮 探测 15 个游戏平台...", "done": False})
                 game_results = await probes.probe_game_platforms(detected_target)
                 game_found = [r for r in game_results if r.get("status") == "found"]
                 game_total = len(game_results)
 
             # 4. 深度分析（使用推理模式）
             if run_deep_analysis:
+                for q in progress_store.values():
+                    await q.put({"message": "🧠 启动深度分析...", "done": False})
                 all_findings = found_probes + game_found
                 if grok_result and grok_result.get("platforms"):
                     all_findings.extend(grok_result["platforms"])
                 deep_analysis = ai_analyzer.grok_deep_analysis(detected_target, all_findings)
+
+            # 发送完成进度
+            for q in progress_store.values():
+                await q.put({"message": "📊 生成分析报告...", "done": True})
 
             osint_results = {
                 "target": detected_target,
@@ -314,6 +334,35 @@ async def chat(req: ChatRequest):
         "target": detected_target,
         "osint_results": osint_results,
     }
+
+@app.get("/api/progress")
+async def progress_stream(request: Request):
+    """SSE 进度流"""
+    queue = asyncio.Queue()
+    queue_id = id(queue)
+    progress_store[queue_id] = queue
+
+    async def event_generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {json.dumps(data)}\n\n"
+                    if data.get("done"):
+                        break
+                except asyncio.TimeoutError:
+                    yield f"data: {json.dumps({'message': '等待中...', 'done': False})}\n\n"
+        finally:
+            if queue_id in progress_store:
+                del progress_store[queue_id]
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+    )
 
 @app.post("/api/strategy")
 async def plan_strategy(req: StrategyRequest):
