@@ -8,18 +8,26 @@ from typing import Optional
 # 添加模块路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
+import uuid
+import json
+from typing import Dict
 
 from modules import maigret_sites, variants, probes, search_engines, ai_analyzer
 
 # === 配置 ===
 PORT = int(os.environ.get("PORT", 8000))
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+PASSWORD = "2632643526"  # 访问密码
+SECRET_KEY = "osint-secret-key-2026"  # 简单 token 密钥
+
+# === 全局状态 ===
+progress_store: Dict[str, asyncio.Queue] = {}  # task_id -> queue
 
 # === 生命周期 ===
 @asynccontextmanager
@@ -47,6 +55,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# === 密码验证 ===
+class AuthRequest(BaseModel):
+    password: str
+
+async def verify_token(authorization: str = Header(None)):
+    """验证 Authorization header 中的 token"""
+    if not authorization:
+        raise HTTPException(401, "未提供认证信息")
+    
+    # 格式: Bearer <token>
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(401, "认证格式错误")
+    
+    token = authorization[7:]  # 去掉 "Bearer "
+    
+    # 简单验证：token 应该是 "osint-" + 密码的 MD5
+    import hashlib
+    expected = "osint-" + hashlib.md5(PASSWORD.encode()).hexdigest()
+    
+    if token != expected:
+        raise HTTPException(401, "认证失败")
+    
+    return token
+
 # === 请求模型 ===
 class ProbeRequest(BaseModel):
     username: str
@@ -63,6 +95,7 @@ class ChatRequest(BaseModel):
     message: str  # 用户消息
     target: Optional[str] = None  # 当前调查目标（可选）
     history: list[dict] = []  # 聊天历史
+    task_id: Optional[str] = None  # 任务 ID，用于 SSE 进度同步
 
 class AnalyzeRequest(BaseModel):
     target: str
@@ -85,6 +118,18 @@ class RunRequest(BaseModel):
 async def health():
     """健康检查"""
     return {"status": "ok", "sites_loaded": len(maigret_sites.load_sites())}
+
+@app.post("/api/auth")
+async def auth(req: AuthRequest):
+    """密码验证，返回 token"""
+    if req.password != PASSWORD:
+        raise HTTPException(401, "密码错误")
+    
+    # 生成 token: "osint-" + 密码的 MD5
+    import hashlib
+    token = "osint-" + hashlib.md5(PASSWORD.encode()).hexdigest()
+    
+    return {"token": token, "status": "ok"}
 
 @app.get("/api/sites")
 async def get_sites(
@@ -172,10 +217,18 @@ async def chat(req: ChatRequest):
     如果消息中包含用户名或搜索请求，AI 会自动触发 OSINT 收集。
     聊天和情报收集同步进行。
     """
-    import re, asyncio
+    import re
     
     message = req.message.strip()
     target = req.target
+    
+    # 生成或使用提供的 task_id
+    task_id = req.task_id or str(uuid.uuid4())
+    
+    # 获取或创建进度队列
+    if task_id not in progress_store:
+        progress_store[task_id] = asyncio.Queue()
+    progress_queue = progress_store[task_id]
     
     # 自动检测消息中的用户名（@username 或 "搜索 xxx" 命令）
     detected_target = None
@@ -201,6 +254,7 @@ async def chat(req: ChatRequest):
         run_game_only = any(kw in msg_lower for kw in ["游戏平台", "游戏", "game", "lol", "wg", "steam"])
         run_deep_analysis = any(kw in msg_lower for kw in ["深度分析", "深度", "分析", "deep", "analyze"])
         run_grok_search = not run_game_only  # 默认执行 Grok 搜索，除非只搜游戏
+        use_grok_probe = any(kw in msg_lower for kw in ["grok 探测", "grok 搜索", "ai 探测", "智能探测"])  # 使用 Grok 批量探测
 
         try:
             grok_result = None
@@ -211,31 +265,46 @@ async def chat(req: ChatRequest):
             deep_analysis = ""
 
             # 发送进度
-            for q in progress_store.values():
-                await q.put({"message": "📝 解析指令...", "done": False})
+            await progress_queue.put({"message": "📝 解析指令...", "done": False})
 
             # 1. Grok 实时搜索（除非只搜游戏平台）
             if run_grok_search:
-                for q in progress_store.values():
-                    await q.put({"message": "🔍 启动 Grok 实时搜索...", "done": False})
+                await progress_queue.put({"message": "🔍 启动 Grok 实时搜索...", "done": False})
                 # 提供 top 50 站点列表给 Grok，提高搜索覆盖率
                 grok_sites = maigret_sites.get_top_sites(50)
                 grok_result = ai_analyzer.grok_search(detected_target, sites=grok_sites)
 
             # 2. Maigret 探测
             if run_full_search:
-                for q in progress_store.values():
-                    await q.put({"message": "📋 全站搜索 1836 个站点...", "done": False})
-                # 全站搜索（1836 站点）
-                sites = maigret_sites.get_top_sites(0)  # 0 = 全部
-                probe_results = await probes.probe_batch(sites, detected_target, 20)
-                found_probes = [r for r in probe_results if r.get("status") == "found"]
-                probe_total = len(probe_results)
-                for q in progress_store.values():
-                    await q.put({"message": f"✅ Maigret 探测完成，发现 {len(found_probes)} 个命中", "done": False})
+                if use_grok_probe:
+                    # 使用 Grok 批量探测（替代 Python httpx）
+                    await progress_queue.put({"message": "🤖 启动 Grok 智能探测 1836 个站点...", "done": False})
+                    sites = maigret_sites.get_top_sites(0)  # 0 = 全部
+                    
+                    # 创建异步进度回调
+                    async def grok_progress(current, total, msg):
+                        await progress_queue.put({"message": msg, "done": current == total})
+                    
+                    # 调用异步 Grok 批量探测
+                    found_probes = await ai_analyzer.grok_batch_probe(
+                        detected_target, 
+                        sites, 
+                        batch_size=50,
+                        progress_callback=grok_progress
+                    )
+                    probe_total = len(sites)
+                    await progress_queue.put({"message": f"✅ Grok 探测完成，发现 {len(found_probes)} 个命中", "done": False})
+                else:
+                    # 使用 Python httpx 探测
+                    await progress_queue.put({"message": "📋 全站搜索 1836 个站点...", "done": False})
+                    # 全站搜索（1836 站点）
+                    sites = maigret_sites.get_top_sites(0)  # 0 = 全部
+                    probe_results = await probes.probe_batch(sites, detected_target, 20)
+                    found_probes = [r for r in probe_results if r.get("status") == "found"]
+                    probe_total = len(probe_results)
+                    await progress_queue.put({"message": f"✅ Maigret 探测完成，发现 {len(found_probes)} 个命中", "done": False})
             elif not run_game_only:
-                for q in progress_store.values():
-                    await q.put({"message": "📋 探测 top 30 站点...", "done": False})
+                await progress_queue.put({"message": "📋 探测 top 30 站点...", "done": False})
                 # 默认 top 30 站点
                 sites = maigret_sites.get_top_sites(30)
                 probe_results = await probes.probe_batch(sites, detected_target, 10)
@@ -244,24 +313,21 @@ async def chat(req: ChatRequest):
 
             # 3. 游戏平台探测
             if not run_full_search or run_game_only:
-                for q in progress_store.values():
-                    await q.put({"message": "🎮 探测 15 个游戏平台...", "done": False})
+                await progress_queue.put({"message": "🎮 探测 15 个游戏平台...", "done": False})
                 game_results = await probes.probe_game_platforms(detected_target)
                 game_found = [r for r in game_results if r.get("status") == "found"]
                 game_total = len(game_results)
 
             # 4. 深度分析（使用推理模式）
             if run_deep_analysis:
-                for q in progress_store.values():
-                    await q.put({"message": "🧠 启动深度分析...", "done": False})
+                await progress_queue.put({"message": "🧠 启动深度分析...", "done": False})
                 all_findings = found_probes + game_found
                 if grok_result and grok_result.get("platforms"):
                     all_findings.extend(grok_result["platforms"])
                 deep_analysis = ai_analyzer.grok_deep_analysis(detected_target, all_findings)
 
             # 发送完成进度
-            for q in progress_store.values():
-                await q.put({"message": "📊 生成分析报告...", "done": True})
+            await progress_queue.put({"message": "📊 生成分析报告...", "done": True})
 
             osint_results = {
                 "target": detected_target,
@@ -274,6 +340,7 @@ async def chat(req: ChatRequest):
                 "mode": "full" if run_full_search else ("game" if run_game_only else "default"),
             }
         except Exception as e:
+            await progress_queue.put({"message": f"❌ 错误: {str(e)}", "done": True})
             osint_results = {"error": str(e)}
     
     # 构建 Grok 聊天消息
@@ -333,14 +400,16 @@ async def chat(req: ChatRequest):
         "reply": reply,
         "target": detected_target,
         "osint_results": osint_results,
+        "task_id": task_id,
     }
 
 @app.get("/api/progress")
-async def progress_stream(request: Request):
-    """SSE 进度流"""
-    queue = asyncio.Queue()
-    queue_id = id(queue)
-    progress_store[queue_id] = queue
+async def progress_stream(request: Request, task_id: str):
+    """SSE 进度流，通过 task_id 同步"""
+    # 获取或创建进度队列
+    if task_id not in progress_store:
+        progress_store[task_id] = asyncio.Queue()
+    queue = progress_store[task_id]
 
     async def event_generator():
         try:
@@ -351,12 +420,15 @@ async def progress_stream(request: Request):
                     data = await asyncio.wait_for(queue.get(), timeout=30.0)
                     yield f"data: {json.dumps(data)}\n\n"
                     if data.get("done"):
+                        # 任务完成，清理队列
+                        if task_id in progress_store:
+                            del progress_store[task_id]
                         break
                 except asyncio.TimeoutError:
                     yield f"data: {json.dumps({'message': '等待中...', 'done': False})}\n\n"
         finally:
-            if queue_id in progress_store:
-                del progress_store[queue_id]
+            if task_id in progress_store:
+                del progress_store[task_id]
 
     return StreamingResponse(
         event_generator(),

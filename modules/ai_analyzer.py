@@ -6,20 +6,22 @@
 import httpx
 import json
 import re
+import asyncio
 
 # Grok API 后端配置
 GROK_BASE_URL = "https://grok2api-2-hpc2.onrender.com"
 GROK_API_KEY = "c9d05cfdfd6b4dbc8f13f474"
 GROK_ENDPOINT = f"{GROK_BASE_URL}/v1/chat/completions"
 
-# 模型常量（grok2api 后端支持的 3 个模型）
+# 模型常量（grok2api 后端支持的模型）
 MODEL_FAST = "grok-4.20-fast"  # 快速响应
 MODEL_DEEP = "grok-4.20-0309-non-reasoning"  # 深度分析 + 实时搜索（无推理链，低延迟）
-MODEL_REASONING = "grok-4.20-0309-reasoning"  # 推理模式（扩展思维链，深度思考）
+MODEL_IMAGE = "grok-imagine-image-lite"  # 图像生成
+# 注意：grok-4.20-0309-reasoning 模型不可用
 
 
 def call_grok(messages: list[dict], model: str = MODEL_DEEP, temperature: float = 0.7, timeout: float = 120.0) -> str:
-    """通用 Grok API 调用函数。
+    """通用 Grok API 调用函数（同步版本）。
 
     Args:
         messages: OpenAI 兼容的 messages 列表
@@ -65,6 +67,56 @@ def call_grok(messages: list[dict], model: str = MODEL_DEEP, temperature: float 
                 return ""
     except Exception as e:
         print(f"[call_grok] 调用失败: {e}")
+        return ""
+
+
+async def call_grok_async(messages: list[dict], model: str = MODEL_DEEP, temperature: float = 0.7, timeout: float = 120.0) -> str:
+    """通用 Grok API 调用函数（异步版本）。
+
+    Args:
+        messages: OpenAI 兼容的 messages 列表
+        model: 模型名称（默认用 DEEP 模型，支持搜索）
+        temperature: 采样温度
+        timeout: 超时时间（秒），搜索任务需要更长
+
+    Returns:
+        模型生成的文本内容；调用失败时返回空字符串
+    """
+    headers = {
+        "Authorization": f"Bearer {GROK_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": 4000,
+        "stream": False,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(GROK_ENDPOINT, headers=headers, json=payload)
+            resp.raise_for_status()
+            # 尝试 JSON 解析，失败则尝试原始文本
+            try:
+                data = resp.json()
+                return data["choices"][0]["message"]["content"]
+            except Exception:
+                # 可能是 SSE 流式响应，尝试解析最后一行 data
+                raw = resp.text
+                for line in reversed(raw.split("\n")):
+                    line = line.strip()
+                    if line.startswith("data: ") and line != "data: [DONE]":
+                        try:
+                            d = json.loads(line[6:])
+                            content = d.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                            if content:
+                                return content
+                        except Exception:
+                            continue
+                return ""
+    except Exception as e:
+        print(f"[call_grok_async] 调用失败: {e}")
         return ""
 
 
@@ -199,6 +251,85 @@ def _extract_personal_info(text: str) -> dict:
         info["age"] = age_match.group(1)
 
     return info
+
+
+async def grok_batch_probe(target: str, sites: list, batch_size: int = 50, progress_callback=None) -> list:
+    """使用 Grok 批量探测站点，替代 Python 的 httpx 探测（异步版本）。
+
+    Grok 可以绕过很多反爬虫机制，直接访问网站并提取内容。
+
+    Args:
+        target: 目标用户名
+        sites: Maigret 站点列表
+        batch_size: 每批处理的站点数（默认 50）
+        progress_callback: 异步进度回调函数，签名 async callback(current, total, message)
+
+    Returns:
+        发现的站点列表，格式：[{"platform": "...", "url": "...", "snippet": "..."}]
+    """
+    found_results = []
+    total_batches = (len(sites) + batch_size - 1) // batch_size
+
+    for i in range(0, len(sites), batch_size):
+        batch = sites[i:i + batch_size]
+        batch_num = i // batch_size + 1
+
+        if progress_callback:
+            await progress_callback(batch_num, total_batches, f"Grok 探测批次 {batch_num}/{total_batches} ({len(batch)} 个站点)")
+
+        # 构建站点 URL 列表
+        site_urls = []
+        for s in batch:
+            url_template = s.get("url", "")
+            if "{username}" in url_template:
+                url = url_template.replace("{username}", target)
+                site_urls.append(f"- {s.get('name', '?')}: {url}")
+
+        if not site_urls:
+            continue
+
+        prompt = (
+            f"请检查以下 {len(batch)} 个网站，看用户名 '{target}' 是否注册了账号：\n\n"
+            f"{chr(10).join(site_urls)}\n\n"
+            f"对于每个网站：\n"
+            f"1. 访问 URL，检查页面是否存在\n"
+            f"2. 如果存在，提取页面标题和简介\n"
+            f"3. 如果不存在或显示 '用户不存在'，跳过\n\n"
+            f"请以 JSON 格式返回结果：\n"
+            f'```json\n'
+            f'[\n'
+            f'  {{"platform": "网站名", "url": "完整URL", "snippet": "页面简介"}},\n'
+            f'  ...\n'
+            f']\n'
+            f'```\n\n'
+            f"只返回存在的账号，不要返回不存在的。"
+        )
+
+        messages = [{"role": "user", "content": prompt}]
+        response = await call_grok_async(messages, model=MODEL_DEEP, temperature=0.3, timeout=180.0)
+
+        # 解析 JSON 结果
+        if response:
+            try:
+                # 尝试提取 JSON 代码块
+                json_match = re.search(r'```json\s*(\{.*?\}|\[.*?\])\s*```', response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(1)
+                    batch_results = json.loads(json_str)
+                    if isinstance(batch_results, list):
+                        found_results.extend(batch_results)
+                else:
+                    # 尝试直接解析
+                    batch_results = json.loads(response)
+                    if isinstance(batch_results, list):
+                        found_results.extend(batch_results)
+            except Exception as e:
+                print(f"[grok_batch_probe] 解析批次 {batch_num} 失败: {e}")
+
+    if progress_callback:
+        await progress_callback(total_batches, total_batches, f"Grok 探测完成，发现 {len(found_results)} 个站点")
+
+    return found_results
 
 
 def grok_deep_analysis(target: str, findings: list[dict]) -> str:
