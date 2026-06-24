@@ -19,6 +19,7 @@ import json
 from typing import Dict
 
 from modules import maigret_sites, variants, probes, search_engines, ai_analyzer, reports
+from modules import tools as osint_tools
 
 # === 配置 ===
 PORT = int(os.environ.get("PORT", 8000))
@@ -118,6 +119,11 @@ class RunRequest(BaseModel):
 async def health():
     """健康检查"""
     return {"status": "ok", "sites_loaded": len(maigret_sites.load_sites())}
+
+@app.get("/api/tools")
+async def list_tools():
+    """返回所有可用工具列表（供前端展示工具调用卡片）"""
+    return {"tools": osint_tools.get_tool_descriptions()}
 
 @app.post("/api/auth")
 async def auth(req: AuthRequest):
@@ -411,12 +417,84 @@ async def chat(req: ChatRequest):
         "task_id": task_id,
     }
 
+def _aggregate_tool_results(tool_results: dict, target: str) -> dict:
+    """将工具调用结果整合成前端期望的 osint_results 格式（保持向后兼容）。
+
+    映射关系：
+    - username_probe / full_search → maigret_found
+    - game_probe → game_found
+    - grok_search → grok_search
+    - deep_analysis → deep_analysis
+    - recursive_probe → graph + related
+    - email_lookup / domain_lookup / phone_lookup → extra_findings
+    - generate_variants → variants
+    - search_engine → search_results
+    """
+    aggregated = {
+        "target": target,
+        "grok_search": {"summary": "", "platforms": [], "personal_info": {}},
+        "maigret_found": [],
+        "maigret_total": 0,
+        "game_found": [],
+        "game_total": 0,
+        "deep_analysis": "",
+        "graph": {"nodes": [], "links": []},
+        "related": [],
+        "variants": [],
+        "search_results": [],
+        "extra_findings": {},
+        "tools_used": list(tool_results.keys()),
+    }
+
+    for tool_name, result in tool_results.items():
+        if result.get("status") != "ok":
+            continue
+        data = result.get("data", {})
+
+        if tool_name in ("username_probe", "full_search"):
+            found = data.get("found", [])
+            aggregated["maigret_found"].extend(found)
+            aggregated["maigret_total"] += data.get("total", 0)
+
+        elif tool_name == "game_probe":
+            found = data.get("found", [])
+            aggregated["game_found"].extend(found)
+            aggregated["game_total"] += data.get("total", 0)
+
+        elif tool_name == "grok_search":
+            aggregated["grok_search"] = data
+
+        elif tool_name == "deep_analysis":
+            aggregated["deep_analysis"] = data.get("analysis", "")
+
+        elif tool_name == "recursive_probe":
+            # 递归探测结果包含 original + related + graph
+            aggregated["maigret_found"].extend(data.get("original", []))
+            aggregated["related"] = data.get("related", [])
+            aggregated["graph"] = data.get("graph", {"nodes": [], "links": []})
+
+        elif tool_name == "generate_variants":
+            aggregated["variants"] = data.get("variants", [])
+
+        elif tool_name == "search_engine":
+            aggregated["search_results"] = data.get("results", [])
+
+        elif tool_name in ("email_lookup", "domain_lookup", "phone_lookup"):
+            aggregated["extra_findings"][tool_name] = data
+
+        elif tool_name == "export_report":
+            # 报告导出结果由前端单独处理
+            aggregated["report_generated"] = True
+
+    return aggregated
+
 @app.post("/api/chat/stream")
 async def chat_stream(req: ChatRequest):
     """流式聊天端点 — AI 回复逐 token SSE 推送。
 
     前端用 fetch + ReadableStream 消费，实时显示 AI 思考和输出。
     OSINT 结果作为最终事件一次性返回。
+    使用工具调用系统：AI 决策 → 并发执行 → 整合结果 → 流式回复。
     """
     import re
 
@@ -444,120 +522,48 @@ async def chat_stream(req: ChatRequest):
 
     async def event_generator():
         try:
-            # === 阶段 1: OSINT 收集（如果有目标） ===
+            # === 阶段 1: 工具调用系统（AI 决策 + 并发执行） ===
             osint_results = None
-            if detected_target:
-                msg_lower = message.lower()
-                run_full_search = any(kw in msg_lower for kw in ["全站", "所有站点", "1836", "全部", "all"])
-                run_game_only = any(kw in msg_lower for kw in ["游戏平台", "游戏", "game", "lol", "wg", "steam"])
-                run_deep_analysis = any(kw in msg_lower for kw in ["深度分析", "深度", "分析", "deep", "analyze"])
+            tool_results = None
+
+            # 决策调用哪些工具
+            await progress_queue.put({"message": "🤖 AI 分析意图，选择工具...", "done": False})
+            selected_tools = await osint_tools.decide_tools(message, detected_target)
+
+            if selected_tools:
+                await progress_queue.put({"message": f"📦 选中工具: {', '.join(selected_tools)}", "done": False})
+                # 推送工具列表给前端（显示工具调用卡片）
+                yield f"event: tools\ndata: {json.dumps({'tools': selected_tools, 'target': detected_target}, ensure_ascii=False)}\n\n"
 
                 try:
-                    grok_result = None
-                    found_probes = []
-                    probe_total = 0
-                    game_found = []
-                    game_total = 0
-                    deep_analysis = ""
+                    # 并发执行所有选中的工具
+                    tool_results = await osint_tools.execute_tools_parallel(
+                        selected_tools, progress_queue, detected_target, message
+                    )
 
-                    await progress_queue.put({"message": "📝 解析指令...", "done": False})
+                    # 推送每个工具的结果给前端
+                    for tname, tresult in tool_results.items():
+                        yield f"event: tool_result\ndata: {json.dumps({'tool': tname, 'result': tresult}, ensure_ascii=False)}\n\n"
 
-                    import asyncio as _asyncio
+                    await progress_queue.put({"message": "✅ 所有工具执行完成", "done": True})
 
-                    async def _do_grok_search():
-                        nonlocal grok_result
-                        await progress_queue.put({"message": "🔍 启动 Grok 实时搜索...", "done": False})
-                        grok_sites = maigret_sites.get_top_sites(50)
-                        loop = _asyncio.get_event_loop()
-                        grok_result = await loop.run_in_executor(None, ai_analyzer.grok_search, detected_target, grok_sites)
-                        await progress_queue.put({"message": "✅ Grok 搜索完成", "done": False})
-
-                    async def _do_maigret_probe():
-                        nonlocal found_probes, probe_total
-                        if run_full_search:
-                            await progress_queue.put({"message": "🌐 启动全站探测 (1836)...", "done": False})
-                            sites = maigret_sites.get_top_sites(0)
-                        else:
-                            await progress_queue.put({"message": "🌐 启动热门站点探测...", "done": False})
-                            sites = maigret_sites.get_top_sites(100)
-
-                        probe_total = len(sites)
-                        found_probes = await probes.probe_batch(sites, detected_target, concurrency=10)
-                        await progress_queue.put({"message": f"✅ 站点探测完成: {len(found_probes)}/{probe_total} 命中", "done": False})
-
-                    async def _do_game_probe():
-                        nonlocal game_found, game_total
-                        await progress_queue.put({"message": "🎮 启动游戏平台探测...", "done": False})
-                        game_sites = maigret_sites.get_sites_by_tags(["gaming", "game"], 15)
-                        game_total = len(game_sites)
-                        if game_total == 0:
-                            game_sites = [s for s in maigret_sites.get_top_sites(30) if any(t in (s.get("tags", [])) for t in ["gaming", "game", "esports"])]
-                            game_total = len(game_sites)
-                        if game_total > 0:
-                            game_found = await probes.probe_batch(game_sites, detected_target, concurrency=5)
-                        await progress_queue.put({"message": f"✅ 游戏平台: {len(game_found)}/{game_total} 命中", "done": False})
-
-                    async def _do_deep_analysis():
-                        nonlocal deep_analysis
-                        if run_deep_analysis and (found_probes or game_found or (grok_result and grok_result.get("platforms"))):
-                            await progress_queue.put({"message": "🧠 执行深度分析...", "done": False})
-                            all_findings = list(found_probes) + list(game_found)
-                            if grok_result and grok_result.get("platforms"):
-                                all_findings.extend(grok_result["platforms"])
-                            deep_analysis = ai_analyzer.analyze_findings(detected_target, {}, all_findings).get("analysis", "")
-                            await progress_queue.put({"message": "✅ 深度分析完成", "done": False})
-
-                    if run_game_only:
-                        tasks = [_do_game_probe()]
-                    else:
-                        tasks = [_do_grok_search(), _do_maigret_probe(), _do_game_probe()]
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                    await _do_deep_analysis()
-
-                    osint_results = {
-                        "grok_search": grok_result,
-                        "maigret_found": found_probes,
-                        "maigret_total": probe_total,
-                        "game_found": game_found,
-                        "game_total": game_total,
-                        "deep_analysis": deep_analysis,
-                    }
-
-                    await progress_queue.put({"message": "✅ 情报收集完成", "done": True})
+                    # 整合工具结果
+                    osint_results = _aggregate_tool_results(tool_results, detected_target)
 
                 except Exception as e:
-                    await progress_queue.put({"message": f"⚠️ 情报收集出错: {e}", "done": True})
+                    await progress_queue.put({"message": f"⚠️ 工具执行出错: {e}", "done": True})
                     osint_results = {"error": str(e)}
 
             # === 阶段 2: 构建 system prompt ===
-            system_content = "你是一名 OSINT 情报分析师助手。根据收集到的情报生成分析报告。用中文回答，使用 Markdown 格式。"
-            if osint_results and not osint_results.get("error"):
-                grok_platforms = osint_results.get("grok_search", {}).get("platforms", []) if osint_results.get("grok_search") else []
-                maigret_found = osint_results.get("maigret_found", [])
-                game_found = osint_results.get("game_found", [])
-                deep_analysis = osint_results.get("deep_analysis", "")
-
-                system_content += f"\n\n目标: {detected_target}\n"
-                if grok_platforms:
-                    system_content += f"\nGrok 搜索命中 ({len(grok_platforms)} 个):\n"
-                    for p in grok_platforms[:10]:
-                        system_content += f"- [{p.get('platform', '?')}] {p.get('url', '')}\n"
-                        if p.get("snippet"):
-                            system_content += f"  → {p['snippet'][:100]}\n"
-                if maigret_found:
-                    system_content += f"\nMaigret 站点命中 ({len(maigret_found)} 个):\n"
-                    for f in maigret_found[:10]:
-                        system_content += f"- [{f.get('platform', '?')}] {f.get('url', '')}\n"
-                        if f.get("snippet"):
-                            system_content += f"  → {f['snippet'][:100]}\n"
-                if game_found:
-                    system_content += f"\n游戏平台命中 ({len(game_found)} 个):\n"
-                    for f in game_found[:10]:
-                        system_content += f"- [{f.get('platform', '?')}] {f.get('url', '')}\n"
-                        if f.get("snippet"):
-                            system_content += f"  → {f['snippet'][:100]}\n"
-                if deep_analysis:
-                    system_content += f"\n深度分析结果:\n{deep_analysis[:1500]}\n"
+            system_content = (
+                "你是一名 OSINT 情报分析智能体。根据工具调用收集到的情报生成分析报告。\n"
+                "用中文回答，使用 Markdown 格式。\n"
+                "如果用户要求导出报告，告知用户可以点击下方的导出按钮（HTML/CSV/JSON/PDF）。\n"
+            )
+            if tool_results:
+                # 用工具结果整合器生成结构化上下文
+                summary = osint_tools.summarize_tool_results(tool_results, detected_target or "")
+                system_content += f"\n\n=== 工具调用结果 ===\n{summary}\n"
 
             messages = [{"role": "system", "content": system_content}]
             for h in req.history[-5:]:
@@ -790,6 +796,14 @@ async def export_json_report(req: ReportRequest):
     from fastapi.responses import PlainTextResponse
     return PlainTextResponse(content=json_content, media_type="application/json",
                             headers={"Content-Disposition": f"attachment; filename=osint-report-{req.target}.json"})
+
+@app.post("/api/report/pdf")
+async def export_pdf_report(req: ReportRequest):
+    """导出 PDF 报告（含统计、表格、AI 分析）"""
+    from fastapi.responses import Response
+    pdf_bytes = reports.generate_pdf_report(req.target, req.results, req.osint_data)
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f"attachment; filename=osint-report-{req.target}.pdf"})
 
 # === 递归身份探测（从 Maigret 学习）===
 

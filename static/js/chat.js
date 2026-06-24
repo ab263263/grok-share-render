@@ -141,6 +141,78 @@ function addPersonalInfo(info) {
   chat.scrollTop = chat.scrollHeight;
 }
 
+// === 工具调用系统（Function Calling 风格）===
+
+// 工具名称中文映射
+const TOOL_NAMES = {
+  username_probe: { name: '用户名探测', icon: '🔍' },
+  recursive_probe: { name: '递归身份挖掘', icon: '🕸️' },
+  game_probe: { name: '游戏平台探测', icon: '🎮' },
+  grok_search: { name: 'Grok AI 搜索', icon: '🤖' },
+  deep_analysis: { name: '深度分析', icon: '🧠' },
+  full_search: { name: '全站搜索', icon: '🌐' },
+  generate_variants: { name: '用户名变体', icon: '🔤' },
+  export_report: { name: '报告导出', icon: '📄' },
+  email_lookup: { name: '邮箱反查', icon: '📧' },
+  domain_lookup: { name: '域名查询', icon: '🌍' },
+  phone_lookup: { name: '电话反查', icon: '📱' },
+  search_engine: { name: '搜索引擎', icon: '🔎' },
+};
+
+// 当前工具卡片容器
+let currentToolCard = null;
+
+// 显示工具调用卡片
+function addToolCard(tools, target) {
+  const chat = document.getElementById('chat-mode');
+  const container = document.createElement('div');
+  container.className = 'tool-card';
+  container.id = 'tool-card-' + Date.now();
+  currentToolCard = container;
+
+  const toolsHtml = tools.map(t => {
+    const info = TOOL_NAMES[t] || { name: t, icon: '⚙️' };
+    return `<div class="tool-item" data-tool="${t}">
+      <span class="tool-icon">${info.icon}</span>
+      <span class="tool-name">${info.name}</span>
+      <span class="tool-status" id="status-${t}">⏳</span>
+    </div>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div class="tool-card-header">
+      <span>🛠️ 工具调用</span>
+      <span class="tool-target">目标: ${target || '未指定'}</span>
+    </div>
+    <div class="tool-list">${toolsHtml}</div>
+    <div class="tool-summary" id="tool-summary"></div>
+  `;
+  chat.appendChild(container);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+// 更新工具状态
+function updateToolStatus(toolName, result) {
+  const statusEl = document.getElementById(`status-${toolName}`);
+  if (!statusEl) return;
+
+  if (result.status === 'ok') {
+    statusEl.textContent = '✅';
+    statusEl.className = 'tool-status done';
+  } else {
+    statusEl.textContent = '❌';
+    statusEl.className = 'tool-status error';
+  }
+
+  // 更新摘要
+  const summaryEl = document.getElementById('tool-summary');
+  if (summaryEl) {
+    const info = TOOL_NAMES[toolName] || { name: toolName, icon: '⚙️' };
+    const msg = result.message || (result.status === 'ok' ? '完成' : '失败');
+    summaryEl.innerHTML += `<div class="tool-result-line">${info.icon} ${info.name}: ${msg}</div>`;
+  }
+}
+
 // === 从 Maigret/OpenOSINT 学习：报告导出 + 关系图谱 ===
 
 // 添加报告导出按钮
@@ -158,6 +230,7 @@ function addReportButtons(target, results, osintData) {
       <button class="report-btn" onclick="exportReport('html', '${target}')">🌐 HTML 报告</button>
       <button class="report-btn" onclick="exportReport('csv', '${target}')">📊 CSV 报告</button>
       <button class="report-btn" onclick="exportReport('json', '${target}')">📋 JSON 报告</button>
+      <button class="report-btn" onclick="exportReport('pdf', '${target}')">📕 PDF 报告</button>
     </div>
   `;
   chat.appendChild(div);
@@ -423,6 +496,12 @@ async function sendMessage() {
             accText += data.text;
           } else if (eventType === 'reasoning') {
             accReasoning += data.text;
+          } else if (eventType === 'tools') {
+            // 工具调用系统：显示工具卡片
+            addToolCard(data.tools || [], data.target);
+          } else if (eventType === 'tool_result') {
+            // 工具执行完成：更新状态
+            updateToolStatus(data.tool, data.result);
           } else if (eventType === 'osint') {
             osintData = data;
           } else if (eventType === 'error') {
@@ -496,6 +575,44 @@ async function sendMessage() {
 
       // 显示 D3.js 关系图谱（从 Maigret 学习）
       if (osintData.graph) showGraph(osintData.graph);
+
+      // 显示额外发现（邮箱/域名/电话反查结果）
+      const extraFindings = osintData.extra_findings || {};
+      if (Object.keys(extraFindings).length > 0) {
+        let extraHtml = '<div class="findings"><div class="findings-header">🔎 额外发现 <span class="badge">' + Object.keys(extraFindings).length + '</span></div>';
+        for (const [tool, data] of Object.entries(extraFindings)) {
+          const info = TOOL_NAMES[tool] || { name: tool, icon: '⚙️' };
+          extraHtml += `<div class="finding-item"><span class="platform-tag">${info.icon} ${info.name}</span><div>`;
+          if (tool === 'email_lookup' && data.gravatar) {
+            extraHtml += `<a href="${data.gravatar.avatar || ''}" target="_blank">Gravatar: ${data.gravatar.username || ''}</a>`;
+            if (data.breaches) extraHtml += `<div class="snippet">${(data.breaches || '').substring(0, 150)}...</div>`;
+          } else if (tool === 'domain_lookup') {
+            if (data.ip) extraHtml += `<div>IP: <strong>${data.ip}</strong></div>`;
+            if (data.whois) extraHtml += `<div class="snippet">${(data.whois || '').substring(0, 150)}...</div>`;
+          } else if (tool === 'phone_lookup') {
+            if (data.info) extraHtml += `<div class="snippet">${(data.info || '').substring(0, 150)}...</div>`;
+          }
+          extraHtml += '</div></div>';
+        }
+        extraHtml += '</div>';
+        const chat = document.getElementById('chat-mode');
+        const div = document.createElement('div');
+        div.innerHTML = extraHtml;
+        chat.appendChild(div.firstElementChild);
+        chat.scrollTop = chat.scrollHeight;
+      }
+
+      // 显示用户名变体
+      const variants = osintData.variants || [];
+      if (variants.length > 0) {
+        const chat = document.getElementById('chat-mode');
+        const div = document.createElement('div');
+        div.className = 'findings';
+        div.innerHTML = `<div class="findings-header">🔤 用户名变体 <span class="badge">${variants.length}</span></div>
+          <div class="finding-item"><div style="flex-wrap:wrap;gap:6px;display:flex">${variants.slice(0, 20).map(v => `<span class="platform-tag" style="cursor:pointer" onclick="document.getElementById('target-input').value='${v}'">${v}</span>`).join('')}</div></div>`;
+        chat.appendChild(div);
+        chat.scrollTop = chat.scrollHeight;
+      }
     }
 
     statusText.textContent = '就绪';

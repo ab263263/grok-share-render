@@ -183,6 +183,126 @@ def generate_csv_report(target: str, results: list) -> str:
     return output.getvalue()
 
 
+def generate_pdf_report(target: str, results: list, osint_data: dict = None) -> bytes:
+    """生成 PDF 报告（使用 reportlab，支持中文）。
+
+    包含：标题、统计、探测结果表格、AI 分析。
+    """
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    import io as _io
+
+    # 注册中文字体（reportlab 内置 CID 字体，无需外部文件）
+    try:
+        pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+        font_name = "STSong-Light"
+    except Exception:
+        font_name = "Helvetica"
+
+    buf = _io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=2*cm, bottomMargin=2*cm, leftMargin=2*cm, rightMargin=2*cm)
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("Title", parent=styles["Title"], fontName=font_name, fontSize=22, textColor=colors.HexColor("#4facfe"))
+    h2_style = ParagraphStyle("H2", parent=styles["Heading2"], fontName=font_name, fontSize=14, textColor=colors.HexColor("#4facfe"))
+    body_style = ParagraphStyle("Body", parent=styles["Normal"], fontName=font_name, fontSize=10, leading=16)
+    cell_style = ParagraphStyle("Cell", parent=styles["Normal"], fontName=font_name, fontSize=8, leading=12)
+
+    story = []
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    found_results = [r for r in results if r.get("status") == "found"]
+    total = len(results)
+    found_count = len(found_results)
+
+    # 标题
+    story.append(Paragraph(f"OSINT 情报分析报告", title_style))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(f"目标: <b>{target}</b> | 生成时间: {now} | 命中: {found_count}/{total}", body_style))
+    story.append(Spacer(1, 16))
+
+    # 统计
+    story.append(Paragraph("📊 统计概览", h2_style))
+    story.append(Spacer(1, 6))
+    stat_data = [
+        ["探测站点", "命中账号", "提取元数据"],
+        [str(total), str(found_count), str(len([r for r in found_results if extract_metadata(r)]))],
+    ]
+    stat_table = Table(stat_data, colWidths=[5*cm, 5*cm, 5*cm])
+    stat_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a1a2e")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#4facfe")),
+        ("FONTNAME", (0, 0), (-1, -1), font_name),
+        ("FONTSIZE", (0, 0), (-1, 0), 10),
+        ("FONTSIZE", (0, 1), (-1, 1), 14),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#2a2a3e")),
+    ]))
+    story.append(stat_table)
+    story.append(Spacer(1, 16))
+
+    # AI 深度分析
+    deep_analysis = (osint_data or {}).get("deep_analysis", "")
+    if deep_analysis:
+        story.append(Paragraph("🧠 AI 深度分析", h2_style))
+        story.append(Spacer(1, 6))
+        # 截断过长的分析
+        analysis_text = deep_analysis[:3000].replace("\n", "<br/>")
+        story.append(Paragraph(analysis_text, body_style))
+        story.append(Spacer(1, 16))
+
+    # Grok 搜索总结
+    grok_summary = (osint_data or {}).get("grok_search", {}).get("summary", "") if osint_data else ""
+    if grok_summary:
+        story.append(Paragraph("🔍 Grok 搜索总结", h2_style))
+        story.append(Spacer(1, 6))
+        summary_text = grok_summary[:2000].replace("\n", "<br/>")
+        story.append(Paragraph(summary_text, body_style))
+        story.append(Spacer(1, 16))
+
+    # 探测结果表格
+    story.append(Paragraph("📊 探测结果详情", h2_style))
+    story.append(Spacer(1, 6))
+
+    if found_results:
+        table_data = [["平台", "URL", "摘要", "置信度"]]
+        for r in found_results[:30]:  # 最多 30 行
+            platform = r.get("platform", "?")
+            url = r.get("url", "")
+            snippet = (r.get("snippet") or "")[:60].replace("\n", " ")
+            confidence = calculate_confidence(r)
+            table_data.append([
+                Paragraph(platform, cell_style),
+                Paragraph(f'<a href="{url}">{url[:40]}</a>', cell_style),
+                Paragraph(snippet, cell_style),
+                str(confidence),
+            ])
+
+        result_table = Table(table_data, colWidths=[2.5*cm, 4*cm, 7*cm, 1.5*cm])
+        result_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1a1a2e")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#4facfe")),
+            ("FONTNAME", (0, 0), (-1, 0), font_name),
+            ("FONTSIZE", (0, 0), (-1, 0), 9),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#2a2a3e")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f5f5f5")]),
+        ]))
+        story.append(result_table)
+    else:
+        story.append(Paragraph("未找到匹配账号", body_style))
+
+    story.append(Spacer(1, 20))
+    story.append(Paragraph("OSINT 情报智能体 | 仅供合法授权的安全研究使用", body_style))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
 def generate_json_report(target: str, results: list, osint_data: dict = None) -> str:
     """生成 JSON 报告（完整结构化数据）。"""
     found = [r for r in results if r.get("status") == "found"]

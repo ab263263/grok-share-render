@@ -317,6 +317,85 @@ body::before {
 
 .personal-info-item strong { color: var(--text-primary); }
 
+/* 工具调用卡片（Function Calling 风格） */
+.tool-card {
+  align-self: flex-start;
+  max-width: 75%;
+  margin-top: 4px;
+  padding: 14px 16px;
+  background: var(--bg-message);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  border-left: 3px solid var(--accent-2);
+  animation: fadeIn 0.3s ease;
+}
+
+.tool-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-2);
+}
+
+.tool-target {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tool-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(0, 242, 254, 0.05);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.tool-icon {
+  font-size: 14px;
+}
+
+.tool-name {
+  flex: 1;
+  color: var(--text-secondary);
+}
+
+.tool-status {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tool-status.done {
+  color: var(--success);
+}
+
+.tool-status.error {
+  color: var(--error);
+}
+
+.tool-summary {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.tool-result-line {
+  padding: 2px 0;
+}
+
 /* 报告导出按钮（从 Maigret 学习） */
 .report-buttons {
   max-width: 900px;
